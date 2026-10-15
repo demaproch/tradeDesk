@@ -16,7 +16,7 @@ const ccxt = require('ccxt');
 const CONFIG = require('./config');
 const { rsi, priceChangePct } = require('./indicators');
 const TradingEngine = require('./engine');
-const { PARAM_SCHEMA, TIMEFRAMES, validatePatch, editableKeys } = require('./params');
+const { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, validatePatch, editableKeys } = require('./params');
 
 // Persistance des paramètres modifiés via le dashboard (survivants aux redémarrages)
 const PARAMS_FILE = path.join(__dirname, 'params.overrides.json');
@@ -276,7 +276,16 @@ async function main() {
   app.get('/api/config', (_req, res) => {
     const params = {};
     for (const k of editableKeys()) params[k] = CONFIG[k];
-    res.json({ params, defaults: DEFAULTS, spec: PARAM_SCHEMA, timeframes: TIMEFRAMES });
+    res.json({
+      params,
+      defaults: DEFAULTS,
+      spec: PARAM_SCHEMA,
+      groups: PARAM_GROUPS,
+      timeframes: TIMEFRAMES,
+      symbols: CONFIG.symbols,
+      initialCapital: CONFIG.initialCapital,
+      maxLeverage: CONFIG.maxLeverage,
+    });
   });
 
   // API : modifier les paramètres via le dashboard (patch validé)
@@ -311,6 +320,17 @@ async function main() {
   app.post('/api/closeall', (_req, res) => {
     engine.closeAll((sym, fallback) => bot.prices[sym] ?? fallback);
     res.json(statePayload());
+  });
+
+  // API : fermer une position précise au prix courant
+  app.post('/api/close/:symbol', (req, res) => {
+    const sym = decodeURIComponent(req.params.symbol);
+    const pos = engine.positions.get(sym);
+    if (!pos) return res.status(404).json({ error: `Aucune position ouverte sur ${sym}.` });
+    const price = bot.prices[sym] ?? pos.entryPrice;
+    const trade = engine.closePosition(sym, price, 'MANUAL');
+    bot.onChange();
+    res.json({ ok: true, trade, state: statePayload() });
   });
 
   // Push temps réel via WebSocket

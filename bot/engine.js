@@ -181,6 +181,12 @@ class TradingEngine {
     };
   }
 
+  /** Temps restant de cooldown pour un symbole (0 si aucun) */
+  cooldownLeft(symbol) {
+    const last = this.lastTradeTime.get(symbol) || 0;
+    return Math.max(0, last + this.cfg.cooldownMs - Date.now());
+  }
+
   /** Paire [min,max] des prix d'entrée/sortie pour une position ouverte */
   tpSlPrices(pos) {
     const dir = pos.side === 'LONG' ? 1 : -1;
@@ -194,6 +200,10 @@ class TradingEngine {
     const params = {};
     for (const k of editableKeys) params[k] = this.cfg[k];
 
+    // cooldown restant par symbole (affiché dans les cartes de signaux)
+    const cooldowns = {};
+    for (const sym of this.cfg.symbols) cooldowns[sym] = this.cooldownLeft(sym);
+
     const positions = [...this.positions.values()].map((p) => {
       const price = pricesBySymbol[p.symbol] ?? p.entryPrice;
       const [tpLo, tpHi] = this.tpSlPrices(p);
@@ -206,6 +216,7 @@ class TradingEngine {
       equity: this.equity(pricesBySymbol),
       timeframe: this.cfg.timeframe,
       params,
+      cooldowns,
       stats: this.stats(),
       positions,
       trades: this.closedTrades.slice(-50).reverse(),
