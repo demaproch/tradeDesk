@@ -11,10 +11,34 @@ const path = require('path');
 const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
+const fs = require('fs');
 const ccxt = require('ccxt');
 const CONFIG = require('./config');
 const { rsi, priceChangePct } = require('./indicators');
 const TradingEngine = require('./engine');
+const { PARAM_SCHEMA, TIMEFRAMES, validatePatch, editableKeys } = require('./params');
+
+// Persistance des paramètres modifiés via le dashboard (survivants aux redémarrages)
+const PARAMS_FILE = path.join(__dirname, 'params.overrides.json');
+const DEFAULTS = {};
+for (const k of editableKeys()) DEFAULTS[k] = CONFIG[k];
+
+function loadOverrides() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(PARAMS_FILE, 'utf8'));
+    for (const [k, v] of Object.entries(raw)) {
+      if (editableKeys().includes(k)) CONFIG[k] = v;
+    }
+    console.log(`💾 Overrides de paramètres chargés (${Object.keys(raw).length} clé(s)).`);
+  } catch { /* premier lancement : rien à charger */ }
+}
+
+function saveOverrides() {
+  const out = {};
+  for (const k of editableKeys()) out[k] = CONFIG[k];
+  try { fs.writeFileSync(PARAMS_FILE, JSON.stringify(out, null, 2)); }
+  catch (e) { console.warn('⚠️ Sauvegarde des paramètres impossible :', e.message); }
+}
 
 const DEMO = process.argv.includes('--demo');
 
@@ -90,6 +114,7 @@ class MomentumBot {
     this.market = market;
     this.timer = null;
     this.running = false;
+    this.paused = false;     // pause via le dashboard (le timer tourne, les cycles sont ignorés)
     this.prices = {};        // symbol -> dernier prix connu
     this.signals = {};       // symbol -> dernière lecture d'indicateurs (dashboard)
     this.onChange = () => {}; // callback push vers le dashboard
@@ -98,29 +123,71 @@ class MomentumBot {
   start() {
     if (this.running) return;
     this.running = true;
+    this.paused = false;
     this.engine.log('INFO', `Bot démarré | timeframe=${this.cfg.timeframe} | cycle=${this.cfg.cycleMs / 1000}s | capital=${this.engine.capital}$`);
     this.runCycle(); // premier cycle immédiat
-    this.timer = setInterval(() => this.runCycle(), this.cfg.cycleMs);
+    this.restartTimer();
   }
 
   stop() {
     this.running = false;
+    this.paused = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.engine.log('INFO', 'Bot arrêté.');
     this.onChange();
   }
 
+  setPaused(p) {
+    this.paused = p;
+    this.engine.log('INFO', p ? '⏸ Bot en pause.' : '▶ Bot repris.');
+    this.onChange();
+  }
+
+  restartTimer() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    if (this.running) this.timer = setInterval(() => this.runCycle(), this.cfg.cycleMs);
+  }
+
   setTimeframe(tf) {
-    if (!['1m', '3m', '5m', '15m', '30m', '1h', '4h'].includes(tf)) return false;
+    if (!TIMEFRAMES.includes(tf)) return false;
     this.cfg.timeframe = tf;
     this.engine.log('INFO', `Timeframe changé -> ${tf}`);
     this.onChange();
     return true;
   }
 
+  /**
+   * Applique un patch de paramètres validé (via params.js).
+   * Le timer est redémarré si cycleMs change ; TP/SL des positions ouvertes sont recalculés.
+   * @returns {{ok:boolean, error?:string, applied?:object}}
+   */
+  applyParams(patch) {
+    const res = validatePatch(patch, this.cfg);
+    if (!res.ok) return res;
+    for (const [k, v] of Object.entries(res.changes)) this.cfg[k] = v;
+    saveOverrides();
+    if ('cycleMs' in res.changes) this.restartTimer();
+    // Les nouvelles valeurs TP/SL s'appliquent aussi aux positions déjà ouvertes
+    for (const pos of this.engine.positions.values()) {
+      pos.tpPct = this.cfg.takeProfitPct;
+      pos.slPct = this.cfg.stopLossPct;
+    }
+    this.engine.log('INFO', `Paramètres mis à jour : ${Object.entries(res.changes).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+    this.onChange();
+    return { ok: true, applied: res.changes };
+  }
+
+  resetParams() {
+    const patch = {};
+    for (const k of editableKeys()) if (DEFAULTS[k] !== this.cfg[k]) patch[k] = DEFAULTS[k];
+    if (!Object.keys(patch).length) return { ok: true, applied: {} };
+    return this.applyParams(patch);
+  }
+
   async runCycle() {
-    if (!this.running) return;
+    if (!this.running || this.paused) return;
     try {
       for (const symbol of this.cfg.symbols) {
         await this.processSymbol(symbol);
@@ -153,10 +220,6 @@ class MomentumBot {
       const exit = this.engine.checkExit(pos, price);
       if (exit) {
         this.engine.closePosition(symbol, price, exit);
-      } else {
-        // PnL latent mis à jour pour l'affichage
-        pos.uPnl = this.engine.unrealizedPnl(pos, price);
-        pos.movePct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (pos.side === 'LONG' ? 1 : -1);
       }
     }
 
@@ -183,6 +246,7 @@ class MomentumBot {
 // ---------- Dashboard ----------
 
 async function main() {
+  loadOverrides();
   const engine = new TradingEngine(CONFIG);
   const market = new MarketData(CONFIG);
   await market.init();
@@ -193,48 +257,70 @@ async function main() {
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
 
+  app.use(express.json());
   app.use(express.static(path.join(__dirname, 'public')));
 
+  // Payload d'état complet envoyé au dashboard (HTTP + WS)
+  const statePayload = () => ({
+    ...engine.snapshot(bot.prices),
+    signals: bot.signals,
+    running: bot.running,
+    paused: bot.paused,
+    demo: DEMO,
+  });
+
   // API : état complet du bot
-  app.get('/api/state', (_req, res) => {
-    res.json({ ...engine.snapshot(bot.prices), signals: bot.signals, running: bot.running, demo: DEMO });
+  app.get('/api/state', (_req, res) => res.json(statePayload()));
+
+  // API : schéma des paramètres éditables + valeurs courantes + défauts
+  app.get('/api/config', (_req, res) => {
+    const params = {};
+    for (const k of editableKeys()) params[k] = CONFIG[k];
+    res.json({ params, defaults: DEFAULTS, spec: PARAM_SCHEMA, timeframes: TIMEFRAMES });
   });
 
-  // API : changer le timeframe (boutons du dashboard)
+  // API : modifier les paramètres via le dashboard (patch validé)
+  app.post('/api/params', (req, res) => {
+    const result = bot.applyParams(req.body || {});
+    res.status(result.ok ? 200 : 400).json({ ...result, state: statePayload() });
+  });
+
+  // API : réinitialiser les paramètres aux valeurs par défaut
+  app.post('/api/params/reset', (_req, res) => {
+    const result = bot.resetParams();
+    res.json({ ...result, state: statePayload() });
+  });
+
+  // API : changer le timeframe (boutons du dashboard) — passe par la validation params
   app.post('/api/timeframe', (req, res) => {
-    let body = '';
-    req.on('data', (c) => (body += c));
-    req.on('end', () => {
-      try {
-        const { tf } = JSON.parse(body || '{}');
-        const ok = bot.setTimeframe(tf);
-        res.json({ ok, timeframe: CONFIG.timeframe });
-      } catch {
-        res.status(400).json({ ok: false });
-      }
-    });
+    const { tf } = req.body || {};
+    const result = bot.applyParams({ timeframe: tf });
+    res.status(result.ok ? 200 : 400).json({ ok: result.ok, timeframe: CONFIG.timeframe });
   });
 
-  // API : start / stop
-  app.post('/api/start', (_req, res) => { bot.start(); res.json({ running: bot.running }); });
-  app.post('/api/stop', (_req, res) => { bot.stop(); res.json({ running: bot.running }); });
+  // API : start / stop / pause
+  app.post('/api/start', (_req, res) => { bot.start(); res.json(statePayload()); });
+  app.post('/api/stop', (_req, res) => { bot.stop(); res.json(statePayload()); });
+  app.post('/api/pause', (req, res) => {
+    if (!bot.running) return res.status(400).json({ error: 'Bot non démarré.' });
+    bot.setPaused(req.body?.paused !== false);
+    res.json(statePayload());
+  });
 
   // API : fermer toutes les positions manuellement au prix courant
   app.post('/api/closeall', (_req, res) => {
     engine.closeAll((sym, fallback) => bot.prices[sym] ?? fallback);
-    res.json(engine.snapshot(bot.prices));
+    res.json(statePayload());
   });
 
   // Push temps réel via WebSocket
   bot.onChange = () => {
-    const payload = JSON.stringify({ ...engine.snapshot(bot.prices), signals: bot.signals, running: bot.running, demo: DEMO });
+    const payload = JSON.stringify(statePayload());
     for (const client of wss.clients) {
       if (client.readyState === 1) client.send(payload);
     }
   };
-  wss.on('connection', (ws) => {
-    ws.send(JSON.stringify({ ...engine.snapshot(bot.prices), signals: bot.signals, running: bot.running, demo: DEMO }));
-  });
+  wss.on('connection', (ws) => ws.send(JSON.stringify(statePayload())));
 
   server.listen(CONFIG.port, () => {
     console.log(`📊 Dashboard : http://localhost:${CONFIG.port}`);

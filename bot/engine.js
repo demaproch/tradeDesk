@@ -181,13 +181,33 @@ class TradingEngine {
     };
   }
 
+  /** Paire [min,max] des prix d'entrée/sortie pour une position ouverte */
+  tpSlPrices(pos) {
+    const dir = pos.side === 'LONG' ? 1 : -1;
+    const pTP = pos.entryPrice * (1 + (dir * pos.tpPct) / 100);
+    const pSL = pos.entryPrice * (1 - (dir * pos.slPct) / 100);
+    return [Math.min(pTP, pSL), Math.max(pTP, pSL)];
+  }
+
   snapshot(pricesBySymbol = {}) {
+    const editableKeys = Object.keys(require('./params').PARAM_SCHEMA);
+    const params = {};
+    for (const k of editableKeys) params[k] = this.cfg[k];
+
+    const positions = [...this.positions.values()].map((p) => {
+      const price = pricesBySymbol[p.symbol] ?? p.entryPrice;
+      const [tpLo, tpHi] = this.tpSlPrices(p);
+      const movePct = ((price - p.entryPrice) / p.entryPrice) * 100 * (p.side === 'LONG' ? 1 : -1);
+      return { ...p, currentPrice: price, uPnl: this.unrealizedPnl(p, price), movePct, tpLo, tpHi };
+    });
+
     return {
       capital: this.capital,
       equity: this.equity(pricesBySymbol),
       timeframe: this.cfg.timeframe,
+      params,
       stats: this.stats(),
-      positions: [...this.positions.values()],
+      positions,
       trades: this.closedTrades.slice(-50).reverse(),
       equityHistory: this.equityHistory.slice(-600),
       logs: this.logs.slice(-60).reverse(),
