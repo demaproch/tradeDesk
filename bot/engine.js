@@ -1,0 +1,198 @@
+// ============================================================
+// Moteur de trading simulé (paper trading)
+// - capital initial 1000 $, risque 8 %, levier 10x (max 12x)
+// - TP +2.8 % / SL -1.0 % sur le mouvement du prix
+// - cooldown 5 min par symbole, 1 position max par symbole
+// ============================================================
+
+const CONFIG = require('./config');
+
+class TradingEngine {
+  constructor(config = CONFIG) {
+    this.cfg = config;
+    this.capital = config.initialCapital;   // capital réalisé (cash)
+    this.positions = new Map();             // symbol -> position ouverte
+    this.closedTrades = [];                 // historique des trades fermés
+    this.lastTradeTime = new Map();         // symbol -> timestamp de dernière ouverture
+    this.equityHistory = [];                // [{t, equity}] pour le graphique
+    this.logs = [];                         // journal des événements (borné)
+  }
+
+  // ---------- utilitaires ----------
+
+  log(level, msg) {
+    const entry = { t: Date.now(), level, msg };
+    this.logs.push(entry);
+    if (this.logs.length > 300) this.logs.shift();
+    const tag = { INFO: 'ℹ️', TRADE: '💹', EXIT: '✅', WARN: '⚠️', ERROR: '❌' }[level] || '';
+    console.log(`[${new Date(entry.t).toISOString()}] ${tag} ${msg}`);
+  }
+
+  /** Prix courant (dernière clôture de bougie) */
+  lastPrice(candles) {
+    return candles[candles.length - 1].close;
+  }
+
+  /** Equity = cash + PnL non réalisé des positions ouvertes */
+  equity(pricesBySymbol = {}) {
+    let eq = this.capital;
+    for (const [sym, pos] of this.positions) {
+      const price = pricesBySymbol[sym] ?? pos.entryPrice;
+      eq += pos.margin + this.unrealizedPnl(pos, price);
+    }
+    return eq;
+  }
+
+  unrealizedPnl(pos, price) {
+    const movePct = ((price - pos.entryPrice) / pos.entryPrice) * 100;
+    const dirMovePct = pos.side === 'LONG' ? movePct : -movePct;
+    // PnL = marge * levier * variation du prix (dans le sens de la position)
+    return pos.margin * pos.leverage * (dirMovePct / 100);
+  }
+
+  recordEquity(pricesBySymbol) {
+    this.equityHistory.push({ t: Date.now(), equity: this.equity(pricesBySymbol) });
+    if (this.equityHistory.length > 2000) this.equityHistory.shift();
+  }
+
+  // ---------- dimensionnement ----------
+
+  /**
+   * Marge = 8 % du capital actuel.
+   * Exposition notionnelle = marge × levier (~80 % du capital en 10x).
+   */
+  computePositionSize() {
+    const margin = this.capital * (this.cfg.riskPct / 100);
+    const leverage = Math.min(this.cfg.leverage, this.cfg.maxLeverage);
+    const notional = margin * leverage;
+    return { margin, leverage, notional };
+  }
+
+  // ---------- entrée ----------
+
+  canOpen(symbol) {
+    // Une seule position à la fois par symbole
+    if (this.cfg.maxOnePositionPerSymbol && this.positions.has(symbol)) return false;
+    // Cooldown de 5 minutes entre deux trades sur le même symbole
+    const last = this.lastTradeTime.get(symbol) || 0;
+    if (Date.now() - last < this.cfg.cooldownMs) return false;
+    return true;
+  }
+
+  /**
+   * Ouvre une position si le signal est validé.
+   * @param {string} symbol
+   * @param {'LONG'|'SHORT'} side
+   * @param {number} price  prix d'entrée
+   * @param {object} meta   { changePct, rsi } pour le log
+   */
+  openPosition(symbol, side, price, meta = {}) {
+    if (!this.canOpen(symbol)) return null;
+    if (!(price > 0)) return null;
+
+    const { margin, leverage, notional } = this.computePositionSize();
+    const qty = notional / price; // taille en unité du contrat
+
+    const pos = {
+      symbol,
+      side,
+      entryPrice: price,
+      margin,
+      leverage,
+      notional,
+      qty,
+      openedAt: Date.now(),
+      tpPct: this.cfg.takeProfitPct,
+      slPct: this.cfg.stopLossPct,
+      meta,
+    };
+
+    this.positions.set(symbol, pos);
+    this.lastTradeTime.set(symbol, Date.now());
+    this.log('TRADE', `Ouverture ${side} ${symbol} @ ${price.toFixed(4)} | marge=${margin.toFixed(2)}$ levier=${leverage}x expo=${notional.toFixed(2)}$ | var=${meta.changePct?.toFixed(3)}% RSI=${meta.rsi?.toFixed(1)}`);
+    return pos;
+  }
+
+  // ---------- sortie ----------
+
+  /**
+   * Vérifie TP/SL d'une position avec le prix courant.
+   * @returns {null|'TP'|'SL'}
+   */
+  checkExit(pos, price) {
+    // Comparaison en ratio brut pour éviter les artéfacts de flottants
+    // (((102.8-100)/100*100) vaut 2.7999… en IEEE-754 et ne déclencherait pas le TP).
+    const ratio = (price - pos.entryPrice) / pos.entryPrice;
+    const dirRatio = pos.side === 'LONG' ? ratio : -ratio;
+    if (dirRatio >= pos.tpPct / 100 - Number.EPSILON) return 'TP';
+    if (dirRatio <= -(pos.slPct / 100) + Number.EPSILON) return 'SL';
+    return null;
+  }
+
+  closePosition(symbol, price, reason) {
+    const pos = this.positions.get(symbol);
+    if (!pos) return null;
+
+    const pnl = this.unrealizedPnl(pos, price);
+    this.capital += pnl;               // le PnL réalisé revient dans le cash
+    this.positions.delete(symbol);
+
+    const trade = {
+      symbol,
+      side: pos.side,
+      entryPrice: pos.entryPrice,
+      exitPrice: price,
+      margin: pos.margin,
+      leverage: pos.leverage,
+      pnl,
+      reason,                          // 'TP' | 'SL' | 'MANUAL'
+      openedAt: pos.openedAt,
+      closedAt: Date.now(),
+    };
+    this.closedTrades.push(trade);
+    if (this.closedTrades.length > 500) this.closedTrades.shift();
+
+    this.log('EXIT', `Fermeture ${reason} ${pos.side} ${symbol} @ ${price.toFixed(4)} | PnL=${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}$ | capital=${this.capital.toFixed(2)}$`);
+    return trade;
+  }
+
+  /** Fermeture manuelle (bouton du dashboard) */
+  closeAll(priceFn) {
+    for (const [sym, pos] of [...this.positions]) {
+      const price = priceFn ? priceFn(sym, pos.entryPrice) : pos.entryPrice;
+      this.closePosition(sym, price, 'MANUAL');
+    }
+  }
+
+  // ---------- statistiques ----------
+
+  stats() {
+    const wins = this.closedTrades.filter((t) => t.pnl > 0);
+    const losses = this.closedTrades.filter((t) => t.pnl <= 0);
+    const totalPnl = this.closedTrades.reduce((s, t) => s + t.pnl, 0);
+    return {
+      capital: this.capital,
+      openPositions: this.positions.size,
+      closedCount: this.closedTrades.length,
+      winRate: this.closedTrades.length ? (wins.length / this.closedTrades.length) * 100 : 0,
+      wins: wins.length,
+      losses: losses.length,
+      totalPnl,
+    };
+  }
+
+  snapshot(pricesBySymbol = {}) {
+    return {
+      capital: this.capital,
+      equity: this.equity(pricesBySymbol),
+      timeframe: this.cfg.timeframe,
+      stats: this.stats(),
+      positions: [...this.positions.values()],
+      trades: this.closedTrades.slice(-50).reverse(),
+      equityHistory: this.equityHistory.slice(-600),
+      logs: this.logs.slice(-60).reverse(),
+    };
+  }
+}
+
+module.exports = TradingEngine;

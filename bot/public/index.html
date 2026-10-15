@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Momentum Bot — Dashboard</title>
+<style>
+  :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--txt:#e6edf3;--muted:#8b949e;
+        --green:#3fb950;--red:#f85149;--accent:#58a6ff;--amber:#d29922}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+  body{background:var(--bg);color:var(--txt);padding:16px;min-height:100vh}
+  h1{font-size:1.2rem;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:.85rem;margin-bottom:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px}
+  .card .label{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px}
+  .card .value{font-size:1.35rem;font-weight:700;margin-top:4px}
+  .pos{color:var(--green)}.neg{color:var(--red)}
+  .row{display:flex;gap:14px;flex-wrap:wrap}
+  .col{flex:1;min-width:320px}
+  .btns{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  button{background:var(--card);color:var(--txt);border:1px solid var(--border);
+         border-radius:8px;padding:7px 14px;cursor:pointer;font-size:.85rem}
+  button:hover{border-color:var(--accent)}
+  button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.danger{border-color:var(--red);color:var(--red)}
+  button.success{border-color:var(--green);color:var(--green)}
+  table{width:100%;border-collapse:collapse;font-size:.82rem}
+  th,td{padding:7px 8px;text-align:left;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:.7rem}
+  .section{margin-bottom:16px}
+  .section h2{font-size:.95rem;margin-bottom:8px;color:var(--accent)}
+  #logs{background:var(--card);border:1px solid var(--border);border-radius:10px;
+        padding:10px;height:220px;overflow-y:auto;font-family:monospace;font-size:.75rem;line-height:1.5}
+  canvas{width:100%;height:220px;background:var(--card);border:1px solid var(--border);border-radius:10px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.7rem;font-weight:700}
+  .badge.LONG{background:rgba(63,185,80,.15);color:var(--green)}
+  .badge.SHORT{background:rgba(248,81,73,.15);color:var(--red)}
+  .badge.TP{background:rgba(63,185,80,.15);color:var(--green)}
+  .badge.SL{background:rgba(248,81,73,.15);color:var(--red)}
+  .badge.MANUAL{background:rgba(210,153,34,.15);color:var(--amber)}
+  .status-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px}
+</style>
+</head>
+<body>
+  <h1>⚡ Momentum Bot <span id="mode" style="font-size:.7rem;color:var(--muted)"></span></h1>
+  <div class="sub">Stratégie momentum 10 bougies + RSI(6) · TP +2.8% / SL −1.0% · risque 8% · levier 10x · cooldown 5 min</div>
+
+  <!-- Indicateurs -->
+  <div class="grid">
+    <div class="card"><div class="label">Capital</div><div class="value" id="capital">—</div></div>
+    <div class="card"><div class="label">Équité (temps réel)</div><div class="value" id="equity">—</div></div>
+    <div class="card"><div class="label">PnL total</div><div class="value" id="pnl">—</div></div>
+    <div class="card"><div class="label">Trades gagnés</div><div class="value" id="winrate">—</div></div>
+    <div class="card"><div class="label">Positions ouvertes</div><div class="value" id="npos">0</div></div>
+    <div class="card"><div class="label">Timeframe</div><div class="value" id="tfLabel">5m</div></div>
+  </div>
+
+  <!-- Contrôles -->
+  <div class="btns">
+    <span style="align-self:center;color:var(--muted);font-size:.8rem;margin-right:4px">Timeframe :</span>
+    <button data-tf="1m">1m</button>
+    <button data-tf="3m">3m</button>
+    <button data-tf="5m" class="active">5m</button>
+    <button data-tf="15m">15m</button>
+    <button data-tf="30m">30m</button>
+    <button data-tf="1h">1h</button>
+    <button data-tf="4h">4h</button>
+    <span style="flex:1"></span>
+    <button id="startBtn" class="success">▶ Start</button>
+    <button id="stopBtn" class="danger">■ Stop</button>
+    <button id="closeBtn" class="danger">✕ Fermer tout</button>
+  </div>
+
+  <div class="row">
+    <div class="col section">
+      <h2>📈 Équité (inclut le PnL non réalisé)</h2>
+      <canvas id="chart" width="800" height="220"></canvas>
+    </div>
+    <div class="col section">
+      <h2>📟 Signaux en direct</h2>
+      <table>
+        <thead><tr><th>Paire</th><th>Prix</th><th>Var 10 bougies</th><th>RSI(6)</th><th>Sens</th></tr></thead>
+        <tbody id="signals"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>📌 Positions ouvertes</h2>
+    <table>
+      <thead><tr><th>Paire</th><th>Sens</th><th>Entrée</th><th>Prix actuel</th><th>Marge</th><th>Levier</th><th>Exposition</th><th>TP</th><th>SL</th><th>PnL latent</th></tr></thead>
+      <tbody id="positions"><tr><td colspan="10" style="color:var(--muted)">Aucune position</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>🗂 Historique des trades</h2>
+    <table>
+      <thead><tr><th>Paire</th><th>Sens</th><th>Entrée</th><th>Sortie</th><th>PnL</th><th>Motif</th><th>Durée</th></tr></thead>
+      <tbody id="trades"><tr><td colspan="7" style="color:var(--muted)">Aucun trade fermé</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>📜 Journal</h2>
+    <div id="logs"></div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt$ = (v) => (v==null?'—':(v<0?'-':'')+'$'+Math.abs(v).toFixed(2));
+const fmtPct = (v,d=2) => (v==null?'—':(v>=0?'+':'')+v.toFixed(d)+'%');
+const cls = (v) => v>0?'pos':(v<0?'neg':'');
+
+// --- boutons timeframe ---
+document.querySelectorAll('[data-tf]').forEach(b => b.onclick = async () => {
+  await fetch('/api/timeframe', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tf:b.dataset.tf})});
+  document.querySelectorAll('[data-tf]').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+});
+$('startBtn').onclick = () => fetch('/api/start',{method:'POST'});
+$('stopBtn').onclick  = () => fetch('/api/stop',{method:'POST'});
+$('closeBtn').onclick = () => fetch('/api/closeall',{method:'POST'});
+
+function drawChart(hist){
+  const c = $('chart'), ctx = c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+  if(!hist || hist.length<2) return;
+  const vals = hist.map(h=>h.equity);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const pad = 20, W=c.width-pad*2, H=c.height-pad*2;
+  // grille
+  ctx.strokeStyle='#21262d';ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){const y=pad+H*i/4;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(c.width-pad,y);ctx.stroke();}
+  // courbe
+  const up = vals[vals.length-1]>=vals[0];
+  ctx.strokeStyle = up ? '#3fb950' : '#f85149';
+  ctx.lineWidth = 2; ctx.beginPath();
+  hist.forEach((h,i)=>{
+    const x = pad + W*i/(hist.length-1);
+    const y = pad + H - ((h.equity-min)/((max-min)||1))*H;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  });
+  ctx.stroke();
+  // labels min/max
+  ctx.fillStyle='#8b949e';ctx.font='11px monospace';
+  ctx.fillText('$'+max.toFixed(0),4,14);
+  ctx.fillText('$'+min.toFixed(0),4,c.height-6);
+}
+
+function render(s){
+  $('mode').textContent = s.demo ? '(DÉMO)' : '(LIVE DATA)';
+  $('capital').textContent = fmt$(s.capital);
+  $('equity').textContent = fmt$(s.equity);
+  const pnl = s.stats.totalPnl;
+  $('pnl').textContent = fmt$(pnl); $('pnl').className = 'value '+cls(pnl);
+  $('winrate').textContent = s.stats.closedCount ? s.stats.winRate.toFixed(0)+'%' : '—';
+  $('npos').textContent = s.positions.length;
+  $('tfLabel').textContent = s.timeframe;
+
+  // positions
+  $('positions').innerHTML = s.positions.length ? s.positions.map(p=>{
+    const tpPrice = p.entryPrice*(1+(p.side==='LONG'?p.tpPct:-p.tpPct)/100);
+    const slPrice = p.entryPrice*(1+(p.side==='LONG'?-p.slPct:p.slPct)/100);
+    return `<tr>
+      <td>${p.symbol}</td><td><span class="badge ${p.side}">${p.side}</span></td>
+      <td>${p.entryPrice.toFixed(4)}</td><td>${(s.signals[p.symbol]?.price??p.entryPrice).toFixed(4)}</td>
+      <td>${fmt$(p.margin)}</td><td>${p.leverage}x</td><td>${fmt$(p.notional)}</td>
+      <td style="color:var(--green)">${tpPrice.toFixed(4)}</td>
+      <td style="color:var(--red)">${slPrice.toFixed(4)}</td>
+      <td class="${cls(p.uPnl||0)}">${fmt$(p.uPnl||0)} (${fmtPct(p.movePct)})</td></tr>`;
+  }).join('') : '<tr><td colspan="10" style="color:var(--muted)">Aucune position</td></tr>';
+
+  // historique
+  $('trades').innerHTML = s.trades.length ? s.trades.map(t=>`<tr>
+      <td>${t.symbol}</td><td><span class="badge ${t.side}">${t.side}</span></td>
+      <td>${t.entryPrice.toFixed(4)}</td><td>${t.exitPrice.toFixed(4)}</td>
+      <td class="${cls(t.pnl)}">${fmt$(t.pnl)}</td>
+      <td><span class="badge ${t.reason}">${t.reason}</span></td>
+      <td>${Math.round((t.closedAt-t.openedAt)/1000)}s</td></tr>`).join('')
+    : '<tr><td colspan="7" style="color:var(--muted)">Aucun trade fermé</td></tr>';
+
+  // signaux
+  $('signals').innerHTML = Object.entries(s.signals||{}).map(([sym,v])=>{
+    let sens='—';
+    if(v.changePct>0.55 && v.rsi>52) sens='<span class="badge LONG">LONG?</span>';
+    else if(v.changePct<-0.55 && v.rsi<48) sens='<span class="badge SHORT">SHORT?</span>';
+    return `<tr><td>${sym}</td><td>${v.price?.toFixed(4)}</td>
+      <td class="${cls(v.changePct)}">${fmtPct(v.changePct,3)}</td>
+      <td>${v.rsi?.toFixed(1)}</td><td>${sens}</td></tr>`;
+  }).join('');
+
+  // logs
+  $('logs').innerHTML = (s.logs||[]).map(l=>`<div>[${new Date(l.t).toLocaleTimeString()}] ${l.msg}</div>`).join('');
+
+  // statut running
+  $('startBtn').classList.toggle('active', s.running);
+  $('stopBtn').classList.toggle('active', !s.running);
+
+  drawChart(s.equityHistory);
+}
+
+// WebSocket temps réel + polling de secours
+function connect(){
+  const ws = new WebSocket(`ws://${location.host}`);
+  ws.onmessage = (e)=>render(JSON.parse(e.data));
+  ws.onclose = ()=>setTimeout(connect,2000);
+}
+connect();
+setInterval(async()=>{try{render(await (await fetch('/api/state')).json())}catch{}},10000);
+</script>
+</body>
+</html>
