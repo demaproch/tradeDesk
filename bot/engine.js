@@ -35,9 +35,10 @@ class TradingEngine {
 
   /**
    * Equity = cash (capital réalisé) + somme des PnL non réalisés.
-   * La marge d'une position ouverte est déjà déduite du cash à l'ouverture :
-   * il ne faut SURTOUT pas la re-additionner ici (ancien bug qui gonflait
-   * l'équité de la mise initiale par position ouverte).
+   * La marge engagée d'une position ouverte est DÉJÀ comprise dans le cash
+   * (elle n'est jamais "re-prélevée") : on ajoute uniquement le PnL latent.
+   * Ancien bug corrigé : la mise initiale était re-additionnée par position
+   * ouverte, ce qui gonflait artificiellement l'équité.
    */
   equity(pricesBySymbol = {}) {
     let eq = this.capital;
@@ -46,6 +47,16 @@ class TradingEngine {
       eq += this.unrealizedPnl(pos, price);
     }
     return eq;
+  }
+
+  /** Somme des PnL non réalisés sur toutes les positions ouvertes. */
+  totalUnrealized(pricesBySymbol = {}) {
+    let u = 0;
+    for (const [sym, pos] of this.positions) {
+      const price = pricesBySymbol[sym] ?? pos.entryPrice;
+      u += this.unrealizedPnl(pos, price);
+    }
+    return u;
   }
 
   unrealizedPnl(pos, price) {
@@ -58,6 +69,26 @@ class TradingEngine {
   recordEquity(pricesBySymbol) {
     this.equityHistory.push({ t: Date.now(), equity: this.equity(pricesBySymbol) });
     if (this.equityHistory.length > 2000) this.equityHistory.shift();
+  }
+
+  /**
+   * Historique d'équité recalculé à partir des trades fermés uniquement.
+   * Permet de reconstruire la courbe après un changement de timeframe :
+   * equity(t) = capital initial + Σ PnL réalisés dont closedAt <= t.
+   * (La marge n'entre jamais dans ce calcul — seul le PnL réalisé compte.)
+   */
+  rebuildEquityHistory() {
+    const start = this.cfg.initialCapital;
+    const sorted = [...this.closedTrades].sort((a, b) => a.closedAt - b.closedAt);
+    let run = start;
+    const hist = [{ t: sorted.length ? sorted[0].closedAt - 1 : Date.now(), equity: run }];
+    for (const tr of sorted) {
+      run += tr.pnl;
+      hist.push({ t: tr.closedAt, equity: run });
+    }
+    // point courant : cash réalisé actuel (sans PnL latent, par convention historique)
+    hist.push({ t: Date.now(), equity: this.capital });
+    this.equityHistory = hist.slice(-2000);
   }
 
   // ---------- dimensionnement ----------
@@ -219,6 +250,7 @@ class TradingEngine {
     return {
       capital: this.capital,
       equity: this.equity(pricesBySymbol),
+      unrealized: this.totalUnrealized(pricesBySymbol),
       timeframe: this.cfg.timeframe,
       params,
       cooldowns,

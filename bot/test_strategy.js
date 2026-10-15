@@ -133,5 +133,33 @@ t('équité cohérente à travers ouverture → TP → fermeture', () => {
   assert.ok(Math.abs(e.capital - 1022.4) < 1e-9);
   assert.ok(Math.abs(e.equity() - 1022.4) < 1e-9); // plus de position => equity == cash
 });
+t('équité multi-positions : jamais la somme des mises (bug "ajoute les mises initiales")', () => {
+  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);   // marge 80$
+  e.openPosition('ETH/USDT:USDT', 'SHORT', 100);  // marge 80$
+  // prix aux points d'entrée -> PnL latent nul -> équité = cash = 1000 (et non 1160)
+  const eq = e.equity({ 'BTC/USDT:USDT': 100, 'ETH/USDT:USDT': 100 });
+  assert.ok(Math.abs(eq - 1000) < 1e-9, `equity=${eq}`);
+  // BTC +1% (uPnl +8$), ETH -0.5% en SHORT (uPnl +4$) -> 1012 exactement
+  const eq2 = e.equity({ 'BTC/USDT:USDT': 101, 'ETH/USDT:USDT': 99.5 });
+  assert.ok(Math.abs(eq2 - 1012) < 1e-9, `equity=${eq2}`);
+  // totalUnrealized = equity - cash
+  assert.ok(Math.abs(e.totalUnrealized({ 'BTC/USDT:USDT': 101, 'ETH/USDT:USDT': 99.5 }) - 12) < 1e-9);
+});
+t('historique d\'équité reconstruit = capital initial + Σ PnL réalisés uniquement', () => {
+  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  e.closePosition('BTC/USDT:USDT', 102.8, 'TP');   // +22.4$ -> cash 1022.4
+  e.openPosition('ETH/USDT:USDT', 'LONG', 100);    // marge = 8% de 1022.4
+  e.closePosition('ETH/USDT:USDT', 99, 'SL');      // -8.1792$
+  e.rebuildEquityHistory();
+  const expected = 1000 + 22.4 - 8 * 1.0224;       // SL sur la 2e position calculée après le TP
+  const last = e.equityHistory[e.equityHistory.length - 1];
+  assert.ok(Math.abs(last.equity - expected) < 1e-6, `last=${last.equity} attendu≈${expected}`);
+  // premier point = capital initial, aucune marge ajoutée nulle part
+  assert.strictEqual(e.equityHistory[0].equity, CONFIG.initialCapital);
+  // aucune marge re-additionnée nulle part : max = cash après le TP, min = capital initial
+  for (const p of e.equityHistory) assert.ok(p.equity <= 1022.4 + 1e-9 && p.equity >= CONFIG.initialCapital - 1e-9);
+});
 
 console.log(`\n${passed} tests passés${process.exitCode ? ' — ÉCHECS DÉTECTÉS' : ' — tout est vert 🟢'}\n`);

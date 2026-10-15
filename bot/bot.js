@@ -192,11 +192,32 @@ class MomentumBot {
       for (const symbol of this.cfg.symbols) {
         await this.processSymbol(symbol);
       }
-      this.engine.recordEquity(this.prices);
+      // Point d'équité : cash réalisé + PnL latent uniquement.
+      // (La marge engagée des positions ouvertes reste comptée dans le cash ;
+      // elle n'est JAMAIS re-additionnée — c'était l'ancien bug.)
+      const eq = this.engine.equity(this.prices);
+      const last = this.engine.equityHistory[this.engine.equityHistory.length - 1];
+      if (!last || Math.abs(last.equity - eq) > 0.005) {
+        this.engine.recordEquity(this.prices);
+      }
       this.onChange();
     } catch (e) {
       this.engine.log('ERROR', `Erreur de cycle : ${e.message}`);
     }
+  }
+
+  /** Fermeture manuelle (dashboard) : ferme au prix courant et enregistre le point d'équité. */
+  closeManually(symbol) {
+    const pos = this.engine.positions.get(symbol);
+    if (!pos) return null;
+    const price = this.prices[symbol] ?? pos.entryPrice;
+    const trade = this.engine.closePosition(symbol, price, 'MANUAL');
+    this.engine.recordEquity(this.prices);
+    return trade;
+  }
+
+  closeAllManually() {
+    for (const sym of [...this.engine.positions.keys()]) this.closeManually(sym);
   }
 
   async processSymbol(symbol) {
@@ -318,17 +339,15 @@ async function main() {
 
   // API : fermer toutes les positions manuellement au prix courant
   app.post('/api/closeall', (_req, res) => {
-    engine.closeAll((sym, fallback) => bot.prices[sym] ?? fallback);
+    bot.closeAllManually();
     res.json(statePayload());
   });
 
   // API : fermer une position précise au prix courant
   app.post('/api/close/:symbol', (req, res) => {
     const sym = decodeURIComponent(req.params.symbol);
-    const pos = engine.positions.get(sym);
-    if (!pos) return res.status(404).json({ error: `Aucune position ouverte sur ${sym}.` });
-    const price = bot.prices[sym] ?? pos.entryPrice;
-    const trade = engine.closePosition(sym, price, 'MANUAL');
+    if (!engine.positions.has(sym)) return res.status(404).json({ error: `Aucune position ouverte sur ${sym}.` });
+    const trade = bot.closeManually(sym);
     bot.onChange();
     res.json({ ok: true, trade, state: statePayload() });
   });
