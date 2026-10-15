@@ -1,0 +1,14 @@
+{
+  "timeframe": "5m",
+  "minMovePct": 0.55,
+  "rsiLongMin": 52,
+  "rsiShortMax": 48,
+  "lookbackCandles": 10,
+  "rsiPeriod": 6,
+  "riskPct": 8,
+  "leverage": 10,
+  "takeProfitPct": 2.8,
+  "stopLossPct": 1,
+  "cycleMs": 5000,
+  "cooldownMs": 0
+}
