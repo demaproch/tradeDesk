@@ -279,7 +279,12 @@
           <h2>📈 Évolution de l'équité</h2>
           <div class="tf-group" id="tfGroup" title="Changer le timeframe"></div>
         </div>
-        <div class="card-body"><canvas id="equityChart"></canvas></div>
+        <div class="card-body">
+          <div class="chart-wrap" style="position:relative">
+            <canvas id="equityChart"></canvas>
+            <div id="chartTip" style="display:none;position:absolute;top:0;left:0;pointer-events:none;z-index:5;background:rgba(15,23,42,0.92);border:1px solid rgba(148,163,184,0.25);border-radius:10px;padding:8px 10px;font-size:11.5px;line-height:1.55;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,0.45);white-space:nowrap;backdrop-filter:blur(6px)"></div>
+          </div>
+        </div>
       </section>
 
       <!-- Signals -->
@@ -539,20 +544,26 @@ function renderLogs() {
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 // ==================== Graphique equity ====================
+const CHART = { data: [], min: 0, max: 1, pad: null, W: 0, H: 0, hover: null };
+
 function drawChart() {
   const cv = document.getElementById('equityChart');
   const dpr = window.devicePixelRatio || 1;
   const W = cv.clientWidth, H = cv.clientHeight;
   cv.width = W * dpr; cv.height = H * dpr;
-  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect( 0, 0, W, H);
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
   const data = STATE.equityHistory;
-  if (data.length < 2) { ctx.fillStyle = '#8b9bb4'; ctx.font = '13px Inter'; ctx.fillText('En attente de données…', 12, H / 2); return; }
+  CHART.data = data; CHART.W = W; CHART.H = H; CHART.min = 0; CHART.max = 1;
+  if (data.length < 2) { CHART.hover = null; hideTip(); ctx.fillStyle = '#8b9bb4'; ctx.font = '13px Inter'; ctx.fillText('En attente de données…', 12, H / 2); return; }
   const pad = { l: 64, r: 14, t: 12, b: 24 };
+  CHART.pad = pad;
   const vals = data.map(d => d.equity);
   let min = Math.min(...vals), max = Math.max(...vals);
   const span = (max - min) || max * 0.01 || 1; min -= span * 0.08; max += span * 0.08;
+  CHART.min = min; CHART.max = max;
   const X = i => pad.l + (i / (data.length - 1)) * (W - pad.l - pad.r);
   const Y = v => pad.t + (1 - (v - min) / (max - min)) * (H - pad.t - pad.b);
+  CHART.X = X; CHART.Y = Y;
   ctx.strokeStyle = 'rgba(148,163,184,0.1)'; ctx.fillStyle = '#8b9bb4'; ctx.font = '10.5px JetBrains Mono'; ctx.lineWidth = 1;
   for (let g = 0; g <= 4; g++) {
     const v = min + (max - min) * g / 4, y = Y(v);
@@ -577,7 +588,78 @@ function drawChart() {
   vals.forEach((v, i) => ctx.lineTo(X(i), Y(v)));
   ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
   ctx.beginPath(); ctx.arc(X(vals.length - 1), Y(vals[vals.length - 1]), 4, 0, 7); ctx.fillStyle = col; ctx.fill();
+
+  // Repaint du curseur si la souris est sur le graphique (évite qu'un update WS n'efface le hover)
+  if (CHART.hover != null) drawHover(ctx);
 }
+
+// ---------- tooltip au survis ----------
+function chartIndexAt(mx) {
+  const { pad, W, data } = CHART;
+  if (!pad || data.length < 2) return null;
+  if (mx < pad.l - 6 || mx > W - pad.r + 6) return null;
+  const t = (mx - pad.l) / (W - pad.l - pad.r);
+  return Math.max(0, Math.min(data.length - 1, Math.round(t * (data.length - 1))));
+}
+
+function drawHover(ctx) {
+  const i = CHART.hover;
+  if (i == null || !CHART.data[i]) return;
+  const d = CHART.data[i];
+  const x = CHART.X(i), y = CHART.Y(d.equity);
+  const cv = document.getElementById('equityChart');
+  const c = ctx || cv.getContext('2d');
+  // ligne verticale + point
+  c.save();
+  c.setLineDash([4, 4]); c.strokeStyle = 'rgba(226,232,240,0.45)'; c.lineWidth = 1;
+  c.beginPath(); c.moveTo(x, CHART.pad.t); c.lineTo(x, CHART.H - CHART.pad.b); c.stroke();
+  c.restore();
+  c.beginPath(); c.arc(x, y, 5, 0, 7);
+  c.fillStyle = '#e2e8f0'; c.fill();
+  c.lineWidth = 2; c.strokeStyle = '#38bdf8'; c.stroke();
+  showTip(i, x, y);
+}
+
+function showTip(i, x, y) {
+  const tip = document.getElementById('chartTip');
+  const d = CHART.data[i];
+  const start = SCHEMA?.initialCapital ?? 1000;
+  const delta = d.equity - start;
+  const pct = (delta / start) * 100;
+  const dt = new Date(d.t);
+  tip.innerHTML =
+    `<div style="color:#94a3b8;font-size:10.5px">${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR')}</div>` +
+    `<div style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:13px;color:#e2e8f0">${usd(d.equity)}</div>` +
+    `<div style="font-family:JetBrains Mono,monospace;font-size:11.5px" class="${delta >= 0 ? 'pos' : 'neg'}">${money(delta)} · ${(pct >= 0 ? '+' : '') + pct.toFixed(2)} %</div>`;
+  tip.style.display = 'block';
+  const wrap = tip.parentElement;
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = x + 14;
+  if (left + tw > wrap.clientWidth - 4) left = x - tw - 14;
+  let top = y - th - 12;
+  if (top < 2) top = y + 14;
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
+function hideTip() { document.getElementById('chartTip').style.display = 'none'; }
+
+(function bindChartHover() {
+  const cv = document.getElementById('equityChart');
+  cv.addEventListener('mousemove', (e) => {
+    const rect = cv.getBoundingClientRect();
+    const i = chartIndexAt(e.clientX - rect.left);
+    if (i !== CHART.hover) {
+      CHART.hover = i;
+      // redraw léger : on re-dessine tout (dominant + courbe + curseur)
+      drawChart();
+    } else if (i != null) {
+      drawHover(); // même index, mais repositionne éventuellement le tooltip
+    }
+  });
+  cv.addEventListener('mouseleave', () => {
+    CHART.hover = null; hideTip(); drawChart();
+  });
+})();
 window.addEventListener('resize', () => STATE && drawChart());
 
 // ==================== Panneau paramètres ====================

@@ -33,12 +33,17 @@ class TradingEngine {
     return candles[candles.length - 1].close;
   }
 
-  /** Equity = cash + PnL non réalisé des positions ouvertes */
+  /**
+   * Equity = cash (capital réalisé) + somme des PnL non réalisés.
+   * La marge d'une position ouverte est déjà déduite du cash à l'ouverture :
+   * il ne faut SURTOUT pas la re-additionner ici (ancien bug qui gonflait
+   * l'équité de la mise initiale par position ouverte).
+   */
   equity(pricesBySymbol = {}) {
     let eq = this.capital;
     for (const [sym, pos] of this.positions) {
       const price = pricesBySymbol[sym] ?? pos.entryPrice;
-      eq += pos.margin + this.unrealizedPnl(pos, price);
+      eq += this.unrealizedPnl(pos, price);
     }
     return eq;
   }

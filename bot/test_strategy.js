@@ -113,11 +113,25 @@ t('cooldown 5 min bloque la réouverture', () => {
   e.lastTradeTime.set('BTC/USDT:USDT', Date.now() - 301_000);
   assert.strictEqual(e.canOpen('BTC/USDT:USDT'), true);
 });
-t('équité = cash + marge + PnL non réalisé', () => {
+t('équité = cash + PnL non réalisé (la mise n\'est JAMAIS re-additionnée)', () => {
   const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
   e.openPosition('BTC/USDT:USDT', 'LONG', 100); // marge 80$, levier 10x
   const eq = e.equity({ 'BTC/USDT:USDT': 101 }); // +1% -> uPnl = 80*10*1% = 8$
-  assert.ok(Math.abs(eq - (1000 + 80 + 8)) < 1e-9);
+  // equity attendue = 1000 + 8 = 1008 (et non 1000 + 80 + 8 = 1088 : ancien bug)
+  assert.ok(Math.abs(eq - 1008) < 1e-9, `equity=${eq}`);
+});
+t('équité = cash quand la position est au prix d\'entrée (pas de bonus de marge)', () => {
+  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  assert.ok(Math.abs(e.equity({ 'BTC/USDT:USDT': 100 }) - 1000) < 1e-9);
+});
+t('équité cohérente à travers ouverture → TP → fermeture', () => {
+  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  assert.ok(Math.abs(e.equity({ 'BTC/USDT:USDT': 102.8 }) - (1000 + 22.4)) < 1e-9); // uPnl au TP
+  e.closePosition('BTC/USDT:USDT', 102.8, 'TP');
+  assert.ok(Math.abs(e.capital - 1022.4) < 1e-9);
+  assert.ok(Math.abs(e.equity() - 1022.4) < 1e-9); // plus de position => equity == cash
 });
 
 console.log(`\n${passed} tests passés${process.exitCode ? ' — ÉCHECS DÉTECTÉS' : ' — tout est vert 🟢'}\n`);
