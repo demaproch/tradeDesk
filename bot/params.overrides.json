@@ -10,5 +10,5 @@
   "takeProfitPct": 2.8,
   "stopLossPct": 1,
   "cycleMs": 5000,
-  "cooldownMs": 0
+  "cooldownMs": 300000
 }

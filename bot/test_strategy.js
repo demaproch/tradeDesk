@@ -6,12 +6,16 @@ const assert = require('assert');
 const CONFIG = require('./config');
 const { rsi, priceChangePct } = require('./indicators');
 const TradingEngine = require('./engine');
+const { TF_MS, closedCandles, aggregate } = require('./candles');
 
 let passed = 0;
 function t(name, fn) {
   try { fn(); console.log(`  ✅ ${name}`); passed++; }
   catch (e) { console.log(`  ❌ ${name}\n     ${e.message}`); process.exitCode = 1; }
 }
+
+// Engine de test SANS frais (isole la logique TP/SL/PnL brut)
+const NOFEE = { ...CONFIG, feePct: 0 };
 
 console.log('\n— Paramètres généraux —');
 t('timeframe par défaut = 5m', () => assert.strictEqual(CONFIG.timeframe, '5m'));
@@ -66,36 +70,74 @@ t('levier plafonné à maxLeverage (12x)', () => {
   assert.strictEqual(e.computePositionSize().leverage, 12);
 });
 
-console.log('\n— TP / SL —');
-t('TP LONG déclenché exactement à +2.8% (flottants gérés)', () => {
-  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+console.log('\n— TP / SL (checkExit retourne {kind, price}) —');
+t('TP LONG déclenché exactement à +2.8%', () => {
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
   e.openPosition('BTC/USDT:USDT', 'LONG', 100);
-  assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 102.8), 'TP');   // 2.79999… IEEE -> TP quand même
-  assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 102.5), null);   // en dessous -> pas de TP
+  assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 102.8).kind, 'TP');
+  assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 102.5), null); // en dessous -> pas de TP
 });
 t('SL LONG déclenché à -1.0%', () => {
-  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
   e.openPosition('BTC/USDT:USDT', 'LONG', 100);
-  assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 99.0), 'SL');
+  assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 99.0).kind, 'SL');
   assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 101), null);
 });
 t('TP SHORT déclenché quand le prix baisse de 2.8%', () => {
-  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
   e.openPosition('ETH/USDT:USDT', 'SHORT', 1000);
-  assert.strictEqual(e.checkExit(e.positions.get('ETH/USDT:USDT'), 972), 'TP');
+  assert.strictEqual(e.checkExit(e.positions.get('ETH/USDT:USDT'), 972).kind, 'TP');
 });
-t('PnL TP = marge × levier × 2.8% = 22.4$ (capital 1000)', () => {
-  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+t('prix d’exécution = prix exact du niveau (pas la clôture qui a slippé)', () => {
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  // clôture à 103.5 : le TP (102.8) est franchi -> exécuté à 102.8, pas 103.5
+  const exit = e.checkExit(e.positions.get('BTC/USDT:USDT'), 103.5);
+  assert.strictEqual(exit.kind, 'TP');
+  assert.ok(Math.abs(exit.price - 102.8) < 1e-9, `price=${exit.price}`);
+  // clôture à 98 : le SL (99) est franchi -> exécuté à 99, pas 98
+  const e2 = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
+  e2.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  const exit2 = e2.checkExit(e2.positions.get('BTC/USDT:USDT'), 98);
+  assert.strictEqual(exit2.kind, 'SL');
+  assert.ok(Math.abs(exit2.price - 99) < 1e-9, `price=${exit2.price}`);
+});
+t('si TP et SL franchis sur la même bougie -> priorité au SL (conservateur)', () => {
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  // on simule un passage direct à une clôture qui a traversé les deux niveaux
+  const exit = e.checkExit(e.positions.get('BTC/USDT:USDT'), 98); // sous SL
+  assert.strictEqual(exit.kind, 'SL');
+});
+t('PnL TP brut = marge × levier × 2.8% = 22.4$ (capital 1000, sans frais)', () => {
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
   e.openPosition('BTC/USDT:USDT', 'LONG', 100);
   const tr = e.closePosition('BTC/USDT:USDT', 102.8, 'TP');
   assert.ok(Math.abs(tr.pnl - 80 * 10 * 0.028) < 1e-9);
   assert.ok(Math.abs(e.capital - (1000 + 22.4)) < 1e-9);
 });
-t('PnL SL = -marge × levier × 1% = -8$', () => {
-  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+t('PnL SL brut = -marge × levier × 1% = -8$ (sans frais)', () => {
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
   e.openPosition('BTC/USDT:USDT', 'LONG', 100);
   const tr = e.closePosition('BTC/USDT:USDT', 99, 'SL');
   assert.ok(Math.abs(tr.pnl + 8) < 1e-9);
+});
+
+console.log('\n— Frais de transaction —');
+t('frais appliqués aux deux jambes, déduits du PnL', () => {
+  const e = new TradingEngine({ ...CONFIG, feePct: 0.04, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);   // notional 800$
+  const tr = e.closePosition('BTC/USDT:USDT', 102.8, 'TP'); // sortie notional 822.4$
+  const expectedFees = (800 + 822.4) * 0.0004;    // 0.64896$
+  assert.ok(Math.abs(tr.fees - expectedFees) < 1e-9, `fees=${tr.fees}`);
+  assert.ok(Math.abs(tr.pnl - (22.4 - expectedFees)) < 1e-9, `pnl=${tr.pnl}`);
+  assert.ok(Math.abs(tr.grossPnl - 22.4) < 1e-9);
+});
+t('feePct = 0 -> aucun frais', () => {
+  const e = new TradingEngine({ ...CONFIG, feePct: 0, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  const tr = e.closePosition('BTC/USDT:USDT', 102.8, 'TP');
+  assert.strictEqual(tr.fees, 0);
 });
 
 console.log('\n— Règles supplémentaires —');
@@ -113,6 +155,43 @@ t('cooldown 5 min bloque la réouverture', () => {
   e.lastTradeTime.set('BTC/USDT:USDT', Date.now() - 301_000);
   assert.strictEqual(e.canOpen('BTC/USDT:USDT'), true);
 });
+t('checkExit ne ferme rien et renvoie le niveau exact — SL avant TP si les deux sont atteignables', () => {
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'SHORT', 100); // TP=97.2, SL=101
+  assert.strictEqual(e.checkExit(e.positions.get('BTC/USDT:USDT'), 100.5), null);
+  const hit = e.checkExit(e.positions.get('BTC/USDT:USDT'), 102); // au-dessus du SL
+  assert.strictEqual(hit.kind, 'SL');
+  assert.ok(Math.abs(hit.price - 101) < 1e-9);
+});
+
+console.log('\n— Bougies closes & agrégation (candles.js) —');
+t('closedCandles retire la dernière bougie (en cours de formation)', () => {
+  const raw = [{ time: 0, close: 1 }, { time: 1, close: 2 }, { time: 2, close: 3 }];
+  assert.deepStrictEqual(closedCandles(raw), [{ time: 0, close: 1 }, { time: 1, close: 2 }]);
+});
+t('closedCandles : moins de 2 bougies -> []', () => {
+  assert.deepStrictEqual(closedCandles([{ time: 0, close: 1 }]), []);
+});
+t('agrège 1m -> 3m (open/high/low/close du bucket)', () => {
+  const m = 60_000;
+  const now = Math.floor(Date.now() / (3 * m)) * (3 * m); // début d'un bucket 3m déjà révolu
+  const raw = [
+    { time: now - 3 * m, open: 10, high: 11, low: 9,  close: 10.5 },
+    { time: now - 2 * m, open: 10.5, high: 12, low: 10, close: 11.5 },
+    { time: now - 1 * m, open: 11.5, high: 13, low: 11, close: 12 },
+    { time: now + 2 * m, open: 12, high: 12.5, low: 11.5, close: 12.2 }, // bucket en cours -> écarté
+  ];
+  const agg = aggregate(raw, TF_MS['1m'], TF_MS['3m']);
+  assert.strictEqual(agg.length, 1);
+  assert.strictEqual(agg[0].open, 10);
+  assert.strictEqual(agg[0].high, 13);
+  assert.strictEqual(agg[0].low, 9);
+  assert.strictEqual(agg[0].close, 12);
+});
+t('agrège : facteur 1 = passe-plat', () => {
+  const raw = [{ time: 0, open: 1, high: 2, low: 0.5, close: 1.5 }];
+  assert.deepStrictEqual(aggregate(raw, TF_MS['5m'], TF_MS['5m']), raw);
+});
 t('équité = cash + PnL non réalisé (la mise n\'est JAMAIS re-additionnée)', () => {
   const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
   e.openPosition('BTC/USDT:USDT', 'LONG', 100); // marge 80$, levier 10x
@@ -126,12 +205,40 @@ t('équité = cash quand la position est au prix d\'entrée (pas de bonus de mar
   assert.ok(Math.abs(e.equity({ 'BTC/USDT:USDT': 100 }) - 1000) < 1e-9);
 });
 t('équité cohérente à travers ouverture → TP → fermeture', () => {
-  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
   e.openPosition('BTC/USDT:USDT', 'LONG', 100);
   assert.ok(Math.abs(e.equity({ 'BTC/USDT:USDT': 102.8 }) - (1000 + 22.4)) < 1e-9); // uPnl au TP
   e.closePosition('BTC/USDT:USDT', 102.8, 'TP');
   assert.ok(Math.abs(e.capital - 1022.4) < 1e-9);
   assert.ok(Math.abs(e.equity() - 1022.4) < 1e-9); // plus de position => equity == cash
+});
+t('équité multi-positions : jamais la somme des mises (bug "ajoute les mises initiales")', () => {
+  const e = new TradingEngine({ ...CONFIG, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);   // marge 80$
+  e.openPosition('ETH/USDT:USDT', 'SHORT', 100);  // marge 80$
+  // prix aux points d'entrée -> PnL latent nul -> équité = cash = 1000 (et non 1160)
+  const eq = e.equity({ 'BTC/USDT:USDT': 100, 'ETH/USDT:USDT': 100 });
+  assert.ok(Math.abs(eq - 1000) < 1e-9, `equity=${eq}`);
+  // BTC +1% (uPnl +8$), ETH -0.5% en SHORT (uPnl +4$) -> 1012 exactement
+  const eq2 = e.equity({ 'BTC/USDT:USDT': 101, 'ETH/USDT:USDT': 99.5 });
+  assert.ok(Math.abs(eq2 - 1012) < 1e-9, `equity=${eq2}`);
+  // totalUnrealized = equity - cash
+  assert.ok(Math.abs(e.totalUnrealized({ 'BTC/USDT:USDT': 101, 'ETH/USDT:USDT': 99.5 }) - 12) < 1e-9);
+});
+t('historique d\'équité reconstruit = capital initial + Σ PnL réalisés uniquement', () => {
+  const e = new TradingEngine({ ...NOFEE, cooldownMs: 0 });
+  e.openPosition('BTC/USDT:USDT', 'LONG', 100);
+  e.closePosition('BTC/USDT:USDT', 102.8, 'TP');   // +22.4$ -> cash 1022.4
+  e.openPosition('ETH/USDT:USDT', 'LONG', 100);    // marge = 8% de 1022.4
+  e.closePosition('ETH/USDT:USDT', 99, 'SL');      // -8.1792$
+  e.rebuildEquityHistory();
+  const expected = 1000 + 22.4 - 8 * 1.0224;       // SL sur la 2e position calculée après le TP
+  const last = e.equityHistory[e.equityHistory.length - 1];
+  assert.ok(Math.abs(last.equity - expected) < 1e-6, `last=${last.equity} attendu≈${expected}`);
+  // premier point = capital initial, aucune marge ajoutée nulle part
+  assert.strictEqual(e.equityHistory[0].equity, CONFIG.initialCapital);
+  // aucune marge re-additionnée nulle part : max = cash après le TP, min = capital initial
+  for (const p of e.equityHistory) assert.ok(p.equity <= 1022.4 + 1e-9 && p.equity >= CONFIG.initialCapital - 1e-9);
 });
 
 console.log(`\n${passed} tests passés${process.exitCode ? ' — ÉCHECS DÉTECTÉS' : ' — tout est vert 🟢'}\n`);

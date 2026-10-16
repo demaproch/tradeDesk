@@ -33,6 +33,7 @@ const PARAM_SCHEMA = {
   stopLossPct:      { type: 'float', min: 0.05,         max: 100,        label: 'Stop Loss', unit: '%', step: 0.1, group: 'exits', order: 'core', help: 'Fermeture automatique quand le mouvement du prix atteint −SL.' },
   cycleMs:          { type: 'int',   min: 5_000,        max: 600_000,    label: 'Intervalle du cycle', unit: 'ms', step: 1000, group: 'execution', order: 'advanced', help: 'Fréquence d\'analyse des paires.' },
   cooldownMs:       { type: 'int',   min: 0,            max: 24 * 3600_000, label: 'Cooldown', unit: 'ms', step: 30_000, group: 'execution', order: 'advanced', help: 'Délai minimum entre deux trades sur un même symbole.' },
+  feePct:           { type: 'float', min: 0,            max: 1,           label: 'Frais par jambe', unit: '%', step: 0.01, group: 'execution', order: 'core', help: 'Frais taker estimés appliqués à l\'entrée ET à la sortie de chaque trade (0 = ignore les frais).' },
 };
 
 // Garde-fous de cohérence entre paramètres croisés
