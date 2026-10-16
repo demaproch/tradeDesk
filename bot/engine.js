@@ -70,6 +70,26 @@ class TradingEngine {
     return null;
   }
 
+  /**
+   * Historique d'équité recalculé à partir des trades fermés uniquement.
+   * Permet de reconstruire la courbe après un changement de timeframe :
+   * equity(t) = capital initial + Σ PnL réalisés dont closedAt <= t.
+   * (La marge n'entre jamais dans ce calcul — seul le PnL réalisé compte.)
+   */
+  rebuildEquityHistory() {
+    const start = this.cfg.initialCapital;
+    const sorted = [...this.closedTrades].sort((a, b) => a.closedAt - b.closedAt);
+    let run = start;
+    const hist = [{ t: sorted.length ? sorted[0].closedAt - 1 : Date.now(), equity: run }];
+    for (const tr of sorted) {
+      run += tr.pnl;
+      hist.push({ t: tr.closedAt, equity: run });
+    }
+    // point courant : cash réalisé actuel (sans PnL latent, par convention historique)
+    hist.push({ t: Date.now(), equity: this.capital });
+    this.equityHistory = hist.slice(-2000);
+  }
+
   // ---------- dimensionnement ----------
 
   /**
