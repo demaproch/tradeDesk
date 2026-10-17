@@ -306,8 +306,8 @@
       <section class="card">
         <div class="card-head"><h2>📜 Trades fermés</h2></div>
         <div class="card-body scroll-y" style="padding-top:4px">
-          <table><thead><tr><th>Clôturé</th><th>Symbole</th><th>Side</th><th>Entrée</th><th>Sortie</th><th>Raison</th><th>PnL</th></tr></thead>
-          <tbody id="tradesBody"><tr><td colspan="7" class="empty">Aucun trade fermé</td></tr></tbody></table>
+          <table><thead><tr><th>Clôturé</th><th>Entrée</th><th>Durée</th><th>Symbole</th><th>Side</th><th>Prix d'entrée</th><th>Sortie</th><th>Raison</th><th>PnL</th></tr></thead>
+          <tbody id="tradesBody"><tr><td colspan="9" class="empty">Aucun trade fermé</td></tr></tbody></table>
         </div>
       </section>
     </div>
@@ -418,7 +418,9 @@ function renderAll() {
   document.getElementById('kCapital').textContent = usd(cap);
   document.getElementById('kCapitalSub').textContent = `départ ${usd(initCap)}`;
   document.getElementById('kEquity').textContent = usd(eq);
-  const eqDelta = eq - cap;
+  // PnL latent fourni par le serveur (= equity - cash). La marge engagée n'est
+  // jamais comptée en plus : equity = cash + Σ pnl non réalisés uniquement.
+  const eqDelta = (typeof STATE.unrealized === 'number') ? STATE.unrealized : (eq - cap);
   document.getElementById('kEquitySub').innerHTML = Math.abs(eqDelta) > 0.005 ? `<span class="${eqDelta >= 0 ? 'pos' : 'neg'}">${money(eqDelta)} latent</span>` : 'aucun PnL latent';
   const pnl = s.totalPnl;
   const kPnl = document.getElementById('kPnl');
@@ -522,11 +524,23 @@ function renderPositions() {
   </tr>`).join('');
 }
 
+function fmtDuration(ms) {
+  if (ms == null || !(ms >= 0)) return '—';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + ' s';
+  const m = Math.floor(s / 60), rs = s % 60;
+  if (m < 60) return m + ' min' + (rs ? ' ' + rs + ' s' : '');
+  const h = Math.floor(m / 60), rm = m % 60;
+  return h + ' h' + (rm ? ' ' + String(rm).padStart(2, '0') + ' min' : '');
+}
+
 function renderTrades() {
   const tb = document.getElementById('tradesBody');
-  if (!STATE.trades.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">Aucun trade fermé</td></tr>'; return; }
+  if (!STATE.trades.length) { tb.innerHTML = '<tr><td colspan="9" class="empty">Aucun trade fermé</td></tr>'; return; }
   tb.innerHTML = STATE.trades.map(t => `<tr>
     <td class="mono" style="color:var(--muted)">${new Date(t.closedAt).toLocaleTimeString('fr-FR')}</td>
+    <td class="mono" style="color:var(--muted)">${t.openedAt ? new Date(t.openedAt).toLocaleTimeString('fr-FR') : '—'}</td>
+    <td class="mono" style="color:var(--muted)">${fmtDuration(t.closedAt - t.openedAt)}</td>
     <td class="mono">${shortSym(t.symbol)}</td>
     <td><span class="side-tag side-${t.side}">${t.side}</span></td>
     <td class="mono">${t.entryPrice.toFixed(4)}</td>
@@ -571,9 +585,15 @@ function drawChart() {
     ctx.fillText('$' + v.toFixed(v > 500 ? 0 : 2), 8, y + 3.5);
   }
   const start = SCHEMA?.initialCapital ?? 1000;
+  // Ligne de référence : capital initial (pointillé) + cash réalisé actuel (fine)
+  const capNow = STATE.capital ?? start;
   if (start > min && start < max) {
     ctx.setLineDash([5, 5]); ctx.strokeStyle = 'rgba(148,163,184,0.35)';
     ctx.beginPath(); ctx.moveTo(pad.l, Y(start)); ctx.lineTo(W - pad.r, Y(start)); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (capNow > min && capNow < max && Math.abs(capNow - start) > span * 0.02) {
+    ctx.setLineDash([2, 4]); ctx.strokeStyle = 'rgba(148,163,184,0.5)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(capNow)); ctx.lineTo(W - pad.r, Y(capNow)); ctx.stroke(); ctx.setLineDash([]);
   }
   const up = vals[vals.length - 1] >= start;
   const col = up ? '#34d399' : '#fb7185';
@@ -624,18 +644,29 @@ function showTip(i, x, y) {
   const tip = document.getElementById('chartTip');
   const d = CHART.data[i];
   const start = SCHEMA?.initialCapital ?? 1000;
+  // Décomposition : cash réalisé (capital courant) + PnL latent au moment du point.
+  // L'équité n'inclut JAMAIS la marge engagée en plus du cash (ancien bug corrigé).
+  const capNow = STATE.capital ?? start;
+  const uLatent = Math.max(0, d.equity - capNow);
   const delta = d.equity - start;
   const pct = (delta / start) * 100;
   const dt = new Date(d.t);
+  const timeStr = `${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR')}`;
   tip.innerHTML =
-    `<div style="color:#94a3b8;font-size:10.5px">${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR')}</div>` +
+    `<div style="color:#94a3b8;font-size:10.5px">${timeStr}</div>` +
     `<div style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:13px;color:#e2e8f0">${usd(d.equity)}</div>` +
-    `<div style="font-family:JetBrains Mono,monospace;font-size:11.5px" class="${delta >= 0 ? 'pos' : 'neg'}">${money(delta)} · ${(pct >= 0 ? '+' : '') + pct.toFixed(2)} %</div>`;
+    `<div style="font-family:JetBrains Mono,monospace;font-size:11.5px" class="${delta >= 0 ? 'pos' : 'neg'}">${money(delta)} · ${(pct >= 0 ? '+' : '') + pct.toFixed(2)} %</div>` +
+    `<div style="border-top:1px solid rgba(148,163,184,0.18);margin:5px 0 4px"></div>` +
+    `<table style="font-size:10.5px;border-collapse:collapse;width:100%">` +
+      `<tr><td style="color:#94a3b8;padding-right:10px">Cash réalisé</td><td style="text-align:right;font-family:JetBrains Mono,monospace">${usd(capNow)}</td></tr>` +
+      `<tr><td style="color:#94a3b8;padding-right:10px">PnL latent</td><td style="text-align:right;font-family:JetBrains Mono,monospace" class="${uLatent > 0.005 ? 'pos' : ''}">${uLatent > 0.005 ? money(uLatent) : '$0.00'}</td></tr>` +
+    `</table>`;
   tip.style.display = 'block';
   const wrap = tip.parentElement;
   const tw = tip.offsetWidth, th = tip.offsetHeight;
   let left = x + 14;
   if (left + tw > wrap.clientWidth - 4) left = x - tw - 14;
+  if (left < 2) left = 2;
   let top = y - th - 12;
   if (top < 2) top = y + 14;
   tip.style.left = left + 'px';
@@ -645,15 +676,20 @@ function hideTip() { document.getElementById('chartTip').style.display = 'none';
 
 (function bindChartHover() {
   const cv = document.getElementById('equityChart');
+  let rafPending = false;
+  const scheduleRedraw = () => {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => { rafPending = false; drawChart(); });
+  };
   cv.addEventListener('mousemove', (e) => {
     const rect = cv.getBoundingClientRect();
     const i = chartIndexAt(e.clientX - rect.left);
     if (i !== CHART.hover) {
       CHART.hover = i;
-      // redraw léger : on re-dessine tout (dominant + courbe + curseur)
-      drawChart();
+      scheduleRedraw(); // redraw léger : courbe + curseur + tooltip
     } else if (i != null) {
-      drawHover(); // même index, mais repositionne éventuellement le tooltip
+      showTip(i, CHART.X(i), CHART.Y(CHART.data[i].equity)); // repositionne éventuellement le tooltip
     }
   });
   cv.addEventListener('mouseleave', () => {
