@@ -286,17 +286,17 @@ class MomentumBot {
   }
 
   /** Fermeture manuelle (dashboard) : ferme au prix courant et enregistre le point d'équité. */
-  closeManually(symbol) {
+  async closeManually(symbol) {
     const pos = this.engine.positions.get(symbol);
     if (!pos) return null;
     const price = this.prices[symbol] ?? pos.entryPrice;
-    const trade = this.engine.closePosition(symbol, price, 'MANUAL');
+    const trade = await this.engine.closePosition(symbol, price, 'MANUAL');
     this.engine.recordEquity(this.prices);
     return trade;
   }
 
-  closeAllManually() {
-    for (const sym of [...this.engine.positions.keys()]) this.closeManually(sym);
+  async closeAllManually() {
+    for (const sym of [...this.engine.positions.keys()]) await this.closeManually(sym);
   }
 
   async processSymbol(symbol) {
@@ -321,7 +321,7 @@ class MomentumBot {
       if (exit) {
         // exécuté AU PRIX EXACT du TP/SL (comme un ordre conditionnel réel),
         // pas à la clôture qui peut avoir slippé plus loin
-        this.engine.closePosition(symbol, exit.price, exit.kind);
+        await this.engine.closePosition(symbol, exit.price, exit.kind);
       }
     }
 
@@ -345,9 +345,9 @@ class MomentumBot {
     const shortSignal = changePct < -this.cfg.minMovePct && r < this.cfg.rsiShortMax;
 
     if (longSignal) {
-      this.engine.openPosition(symbol, 'LONG', closePrice, { changePct, rsi: r });
+      await this.engine.openPosition(symbol, 'LONG', closePrice, { changePct, rsi: r });
     } else if (shortSignal) {
-      this.engine.openPosition(symbol, 'SHORT', closePrice, { changePct, rsi: r });
+      await this.engine.openPosition(symbol, 'SHORT', closePrice, { changePct, rsi: r });
     }
   }
 }

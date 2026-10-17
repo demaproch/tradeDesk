@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>momBot — Connexion</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230ea5e9'/%3E%3Cpath d='M10 45V27M10 33c0-5 3.5-8 8-8s8 3 8 8v12M26 33c0-5 3.5-8 8-8s8 3 8 8v12' stroke='%23fff' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh; display: grid; place-items: center;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: #0b1020;
+    background-image:
+      radial-gradient(600px 400px at 15% 10%, rgba(14,165,233,.14), transparent 60%),
+      radial-gradient(700px 500px at 85% 90%, rgba(99,102,241,.16), transparent 60%);
+    color: #e5e9f2;
+  }
+  .card {
+    width: min(400px, 92vw); padding: 34px 30px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 18px; backdrop-filter: blur(14px);
+    box-shadow: 0 24px 60px rgba(0,0,0,.45);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .mark {
+    width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #22d3ee, #6366f1);
+    font-weight: 800; font-size: 24px; color: #0b1020;
+  }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: .3px; }
+  h1 span { color: #7dd3fc; }
+  p.sub { color: #9aa7bd; font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+  label { display: block; font-size: 12px; color: #9aa7bd; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .6px; }
+  input[type=password] {
+    width: 100%; padding: 12px 14px; border-radius: 10px; font-size: 15px;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.35); color: #fff;
+    outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  input[type=password]:focus { border-color: #22d3ee; box-shadow: 0 0 0 3px rgba(34,211,238,.18); }
+  button {
+    margin-top: 22px; width: 100%; padding: 13px; border: 0; border-radius: 10px;
+    background: linear-gradient(135deg, #0ea5e9, #6366f1); color: #fff;
+    font-size: 15px; font-weight: 700; cursor: pointer; transition: filter .15s, transform .05s;
+  }
+  button:hover { filter: brightness(1.12); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .55; cursor: wait; }
+  .msg { margin-top: 16px; font-size: 13px; min-height: 18px; line-height: 1.45; }
+  .msg.err { color: #fda4af; }
+  .msg.ok { color: #86efac; }
+  footer { margin-top: 18px; font-size: 11px; color: #64748b; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <div class="mark">m</div>
+      <h1><span>mom</span>Bot</h1>
+    </div>
+    <p class="sub">Dashboard protégé. Saisissez le mot de passe pour accéder au bot.<br />
+    (défini via <code>MOMBOT_PASSWORD</code>, ou généré au premier lancement et affiché dans la console du serveur)</p>
+    <form id="f" autocomplete="off">
+      <label for="pw">Mot de passe</label>
+      <input type="password" id="pw" autofocus required placeholder="••••••••" />
+      <button id="btn" type="submit">Se connecter</button>
+      <div class="msg" id="msg"></div>
+    </form>
+    <footer>momBot · session httpOnly · CSRF activé</footer>
+  </div>
+<script>
+const f = document.getElementById('f'), pw = document.getElementById('pw'),
+      btn = document.getElementById('btn'), msg = document.getElementById('msg');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btn.disabled = true; msg.className = 'msg'; msg.textContent = 'Connexion…';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw.value })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      sessionStorage.setItem('mombot_csrf', j.csrf || '');
+      msg.className = 'msg ok'; msg.textContent = '✅ Connecté, redirection…';
+      location.href = '/';
+    } else {
+      msg.className = 'msg err'; msg.textContent = '❌ ' + (j.error || 'Échec de connexion.');
+      btn.disabled = false; pw.select();
+    }
+  } catch (err) {
+    msg.className = 'msg err'; msg.textContent = '❌ Serveur injoignable.';
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
