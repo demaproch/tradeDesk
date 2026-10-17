@@ -27,6 +27,9 @@ async function flushTests() { await Promise.all(pending); }
 // Engine de test SANS frais (isole la logique TP/SL/PnL brut)
 const NOFEE = { ...CONFIG, feePct: 0 };
 
+// Engine de test SANS frais (isole la logique TP/SL/PnL brut)
+const NOFEE = { ...CONFIG, feePct: 0 };
+
 console.log('\n— Paramètres généraux —');
 t('timeframe par défaut = 5m', () => assert.strictEqual(CONFIG.timeframe, '5m'));
 t('5 paires configurées', () => assert.deepStrictEqual(CONFIG.symbols, ['BTC/USDT:USDT','ETH/USDT:USDT','SOL/USDT:USDT','AVAX/USDT:USDT','SUI/USDT:USDT']));
