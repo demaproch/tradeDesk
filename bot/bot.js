@@ -15,7 +15,7 @@
 //   3. TP/SL évalués sur les clôtures, exécutés AUX PRIX EXACTS du TP/SL.
 //   4. Frais taker estimés (feePct par jambe) déduits du PnL réalisé.
 //
-// Dashboard : http://localhost:3000
+// momBot — Dashboard : http://localhost:3000
 // ============================================================
 
 const path = require('path');
