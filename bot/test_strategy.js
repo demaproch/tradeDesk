@@ -14,6 +14,13 @@ function t(name, fn) {
   // les fonctions de test peuvent être async (openPosition/closePosition sont async)
   tests.push([name, fn]);
 }
+process.on('exit', () => { /* noop */ });
+async function flushTests() { await Promise.all(pending); }
+// Le total est affiché APRÈS exécution de tous les tests (certains sont async) ;
+// le compteur final passe par un dernier micro-tâche dans la file `pending`.
+
+// Engine de test SANS frais (isole la logique TP/SL/PnL brut)
+const NOFEE = { ...CONFIG, feePct: 0 };
 
 // Engine de test SANS frais (isole la logique TP/SL/PnL brut)
 const NOFEE = { ...CONFIG, feePct: 0 };
