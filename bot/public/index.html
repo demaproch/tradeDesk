@@ -1147,14 +1147,18 @@ function setTimeframe(tf) {
 
 // ==================== Actions ====================
 async function postJson(url, body) {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(CSRF ? { 'X-CSRF-Token': CSRF } : {}) },
-    credentials: 'same-origin',
-    body: JSON.stringify(body),
-  });
+  let r;
+  try {
+    r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(CSRF ? { 'X-CSRF-Token': CSRF } : {}) },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
+  } catch (e) { toast('⚠️ Serveur injoignable — vérifie que le bot tourne.', true); return {}; }
   if (r.status === 401) { location.href = '/login'; return {}; }
   const j = await r.json().catch(() => ({}));
+  if (!r.ok && j.error) toast('⚠️ ' + j.error, true);   // ex. « Jeton CSRF manquant », « Bot non démarré »
   if (j.state) STATE = j.state;
   if (STATE) render();
   return j;

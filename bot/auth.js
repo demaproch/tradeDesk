@@ -155,11 +155,17 @@ class AuthManager {
   }
 
   /** Toute méthode mutante sur /api/* exige le jeton CSRF (sauf login/logout). */
-  requireCsrf(req, res, next) {
-    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-    if (req.path === '/api/login' || req.path === '/api/logout') return next();
-    if (this.checkCsrf(req.session, req)) return next();
-    res.status(403).json({ error: 'Jeton CSRF manquant ou invalide.' });
+  requireCsrf() {
+    // renvoie une fonction liée : évite la perte de `this` quand Express
+    // invoque le middleware sans contexte (TypeError: this.checkCsrf undefined)
+    return (req, res, next) => {
+      try {
+        if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+        if (req.path === '/api/login' || req.path === '/api/logout') return next();
+        if (this.checkCsrf(req.session, req)) return next();
+        return res.status(403).json({ error: 'Jeton CSRF manquant ou invalide.' });
+      } catch (e) { return next(e); }
+    };
   }
 
   /** WS : le handshake doit porter un cookie de session valide. */

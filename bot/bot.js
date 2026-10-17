@@ -539,7 +539,7 @@ async function main() {
 
   app.use(express.json());
   app.use(auth.requireAuth(path.join(__dirname, 'public')));
-  app.use(auth.requireCsrf);
+  app.use(auth.requireCsrf()); // () : renvoie une closure liée à `auth` (sinon this perdu → 500 sur POST)
   app.use(express.static(path.join(__dirname, 'public')));
 
   // ---------- Routes d'authentification ----------
