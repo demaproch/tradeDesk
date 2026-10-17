@@ -121,6 +121,29 @@
   .card-head h2 { font-size: 13.5px; font-weight: 800; letter-spacing: 0.01em; display:flex; align-items:center; gap:8px; }
   .card-body { padding: 16px 18px; }
 
+  /* ---------- Panneau repliable (collapsible) ---------- */
+  .card-head.clickable { cursor: pointer; user-select: none; }
+  .card-head.clickable:hover { background: var(--bg-soft); }
+  .chev {
+    display: inline-block; width: 0; height: 0; margin-left: 2px;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid var(--muted); transition: transform .22s ease;
+  }
+  .card.collapsed .chev { transform: rotate(-90deg); }
+  .card.collapsed .card-body.settings-body { display: none; }
+  .card.collapsed .card-head { border-bottom: none; }
+  .params-summary {
+    display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
+    border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);
+  }
+  .card.collapsed .params-summary { display: flex; }
+  .params-summary .chip {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 7px; padding: 3px 8px; font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; color: var(--text);
+  }
+  .params-summary .chip b { color: var(--accent, #4cc9f0); font-weight: 700; }
+
   /* ---------- Timeframe segmented control ---------- */
   .tf-group { display: flex; gap: 0; flex-wrap: wrap; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 11px; padding: 3px; }
   .tf-btn {
@@ -314,9 +337,13 @@
 
     <!-- Right column : settings + logs -->
     <div class="col">
-      <section class="card">
-        <div class="card-head"><h2>⚙️ Paramètres du bot</h2><span style="font-size:10.5px;color:var(--muted)">appliqués en direct</span></div>
-        <div class="card-body">
+      <section class="card" id="paramsCard">
+        <div class="card-head clickable" onclick="toggleParams(event)" title="Cliquer pour replier / déplier">
+          <h2>⚙️ Paramètres du bot <span class="chev"></span></h2>
+          <span style="font-size:10.5px;color:var(--muted)">appliqués en direct</span>
+        </div>
+        <div class="params-summary" id="paramsSummary"></div>
+        <div class="card-body settings-body">
           <form class="settings-form" id="settingsForm" onsubmit="return saveSettings(event)" autocomplete="off">
             <div id="settingsGroups" style="display:grid;gap:12px"></div>
             <details class="pgroup" id="advWrap" style="display:none">
@@ -712,6 +739,42 @@ function hideTip() { document.getElementById('chartTip').style.display = 'none';
 })();
 window.addEventListener('resize', () => STATE && drawChart());
 
+// ==================== Panneau paramètres repliable ====================
+const PARAMS_COLLAPSE_KEY = 'paramsCardCollapsed';
+
+function toggleParams(e) {
+  // Clic sur un élément interactif du header (bouton, lien...) : ne pas replier
+  if (e && e.target.closest('button, a, input, select')) return;
+  const card = document.getElementById('paramsCard');
+  const collapsed = !card.classList.contains('collapsed');
+  card.classList.toggle('collapsed', collapsed);
+  try { localStorage.setItem(PARAMS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
+}
+
+// Résumé affiché quand le panneau est replié ; badge « non appliquées » si ébauche en cours
+function updateParamsSummary() {
+  const el = document.getElementById('paramsSummary');
+  if (!el || !SCHEMA || !STATE) return;
+  const chips = [];
+  let dirtyCount = 0;
+  for (const k of ALL_KEYS()) {
+    const spec = SCHEMA.spec[k];
+    if (spec.order === 'advanced') continue;   // only key params in summary
+    const formEl = document.getElementById('in_' + k);
+    let v = serverValue(k);
+    if (formEl) {
+      const iv = inputValue(formEl, k);
+      if (Number.isFinite(iv) && iv !== v) { v = iv; dirtyCount++; }
+    }
+    chips.push(`<span class="chip">${spec.label} <b>${humanize(k, v)}</b></span>`);
+  }
+  let html = chips.join('');
+  if (dirtyCount > 0) {
+    html += `<span class="chip" style="border-color:#e0a458;color:#e0a458">● ${dirtyCount} modif. non appliquée(s)</span>`;
+  }
+  el.innerHTML = html;
+}
+
 // ==================== Panneau paramètres ====================
 function buildSettings() {
   const groupsEl = document.getElementById('settingsGroups');
@@ -791,6 +854,7 @@ function updateDirty() {
   badge.textContent = `● ${n} modification(s) non appliquée(s)`;
   btn.disabled = !n;
   updatePreview();
+  updateParamsSummary();
 }
 
 // Aperçu en direct du dimensionnement et du R/R selon l'ébauche du formulaire
@@ -882,6 +946,13 @@ function closePosition(encSym) {
 
 ensureSchema().catch(() => {});
 connect();
+
+// Restaurer l'état replié/déplié du panneau paramètres (mémoire navigateur)
+try {
+  if (localStorage.getItem(PARAMS_COLLAPSE_KEY) === '1') {
+    document.getElementById('paramsCard').classList.add('collapsed');
+  }
+} catch (_) {}
 </script>
 </body>
 </html>
