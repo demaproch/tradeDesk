@@ -279,6 +279,9 @@ class MomentumBot {
     this.timer = null;
     this.running = false;
     this.paused = false;     // pause via le dashboard (le timer tourne, les cycles sont ignorés)
+    this.startedAt = null;   // horodatage du dernier démarrage (uptime)
+    this.pausedMs = 0;       // temps cumulé en pause depuis le démarrage (uptime effectif)
+    this._pausedSince = null;
     this.prices = {};        // symbol -> dernier prix de CLÔTURE connue (mark-to-market)
     this.signals = {};       // symbol -> dernière lecture d'indicateurs (dashboard)
     this.lastCandleTime = new Map(); // symbol -> timestamp de la dernière bougie close traitée
@@ -301,6 +304,9 @@ class MomentumBot {
     this.resetEquitySeries();
     this.running = true;
     this.paused = false;
+    this.startedAt = Date.now();
+    this.pausedMs = 0;
+    this._pausedSince = null;
     this.engine.log('INFO', `Bot démarré | timeframe=${this.cfg.timeframe} | cycle=${this.cfg.cycleMs / 1000}s | capital=${this.engine.capital.toFixed(2)}$ | frais=${this.cfg.feePct}%/jambe`);
     this.runCycle(); // premier cycle immédiat
     this.restartTimer();
@@ -311,14 +317,32 @@ class MomentumBot {
     this.paused = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.startedAt = null;
+    this.pausedMs = 0;
+    this._pausedSince = null;
     this.engine.log('INFO', 'Bot arrêté.');
     this.onChange();
   }
 
   setPaused(p) {
+    if (p === this.paused) return; // évite de fausser le compteur sur un doublon
     this.paused = p;
+    if (p) {
+      this._pausedSince = Date.now();
+    } else if (this._pausedSince) {
+      this.pausedMs += Date.now() - this._pausedSince;
+      this._pausedSince = null;
+    }
     this.engine.log('INFO', p ? '⏸ Bot en pause.' : '▶ Bot repris.');
     this.onChange();
+  }
+
+  /** Uptime depuis le dernier démarrage (ms). En pause, on soustrait le temps passé en pause. */
+  uptimeMs(now = Date.now()) {
+    if (!this.running || !this.startedAt) return 0;
+    let pausedTotal = this.pausedMs;
+    if (this._pausedSince) pausedTotal += now - this._pausedSince;
+    return Math.max(0, now - this.startedAt - pausedTotal);
   }
 
   restartTimer() {
@@ -569,6 +593,9 @@ async function main() {
     signals: bot.signals,
     running: bot.running,
     paused: bot.paused,
+    startedAt: bot.startedAt,
+    uptimeMs: bot.uptimeMs(),
+    processUptimeMs: Math.round(process.uptime() * 1000), // uptime du processus serveur
     demo: DEMO,
     security: {
       tradingMode: CONFIG.tradingMode,

@@ -329,6 +329,7 @@
       </div>
     </div>
     <div id="connPill" class="status-pill stopped"><span class="dot"></span><span id="connTxt">Connexion…</span></div>
+    <div id="uptimePill" class="status-pill" style="display:none" title="Uptime du bot depuis le dernier démarrage (le temps en pause est décompté)">⏱ <span id="uptimeTxt">—</span></div>
     <div id="modePill" class="status-pill" style="display:none" title="Mode de trading actuel"></div>
     <div id="demoPill" class="status-pill badge-demo" style="display:none">🧪 DÉMO</div>
     <button id="btnToggle" class="btn btn-primary" onclick="toggleBot()">▶ Démarrer</button>
@@ -540,6 +541,8 @@ async function ensureSchema() {
 }
 
 function render() {
+  // Mémorise la base d'uptime à la réception (pour le faire défiler localement)
+  if (STATE && typeof STATE.uptimeMs === 'number') { _uptimeBase = STATE.uptimeMs; _uptimeLocalAt = Date.now(); }
   ensureSchema().then(renderAll);
 }
 
@@ -581,6 +584,9 @@ function renderAll() {
   bp.textContent = STATE.paused ? '▶ Reprendre' : '⏸ Pause';
   const conn = document.getElementById('connPill');
   conn.className = 'status-pill ' + (STATE.running ? (STATE.paused ? 'paused-state' : 'running') : 'stopped');
+  // uptime : base déjà mémorisée dans render(); masqué si bot arrêté, sinon rafraîchi ici
+  if (typeof STATE.uptimeMs === 'number') { _uptimeBase = STATE.uptimeMs; _uptimeLocalAt = Date.now(); }
+  updateUptime();
   document.getElementById('demoPill').style.display = STATE.demo ? '' : 'none';
 
   renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); drawChart();
@@ -675,16 +681,35 @@ function fmtDuration(ms) {
   return h + ' h' + (rm ? ' ' + String(rm).padStart(2, '0') + ' min' : '');
 }
 
-// Tick "durée en direct" des positions ouvertes (re-render léger chaque seconde)
+// Tick "durée en direct" des positions ouvertes + uptime du bot (chaque seconde)
 setInterval(() => {
   const cells = document.querySelectorAll('.live-dur');
-  if (!cells.length) return;
-  const nowMs = Date.now();
-  cells.forEach((c) => {
-    const o = Number(c.dataset.opened);
-    if (o) c.textContent = fmtDuration(nowMs - o);
-  });
+  if (cells.length) {
+    const nowMs = Date.now();
+    cells.forEach((c) => {
+      const o = Number(c.dataset.opened);
+      if (o) c.textContent = fmtDuration(nowMs - o);
+    });
+  }
+  updateUptime();
 }, 1000);
+
+// Uptime : le serveur envoie uptimeMs à chaque événement WS ; on le fait défiler
+// localement entre deux réceptions pour un compteur fluide.
+let _uptimeBase = null;   // uptimeMs reçu du serveur
+let _uptimeLocalAt = 0;   // Date.now() à la réception
+function updateUptime() {
+  const pill = document.getElementById('uptimePill');
+  const txt = document.getElementById('uptimeTxt');
+  if (!pill || !txt) return;
+  if (!STATE || !STATE.running || _uptimeBase == null) {
+    pill.style.display = 'none';
+    return;
+  }
+  pill.style.display = '';
+  const live = _uptimeBase + (Date.now() - _uptimeLocalAt);
+  txt.textContent = fmtDuration(live) + (STATE.paused ? ' ⏸' : '');
+}
 
 function renderTrades() {
   const tb = document.getElementById('tradesBody');
