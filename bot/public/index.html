@@ -156,6 +156,8 @@
     border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);
   }
   .card.collapsed .keys-summary { display: flex; }
+  /* Sécurité : quand le panneau est replié, les puces de résumé sont masquées (flou) pour ne rien exposer */
+  #keysCard.card.collapsed .keys-summary { display: none; }
   .params-summary {
     display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
     border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);

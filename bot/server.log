@@ -40,3 +40,17 @@
 [2026-10-17T21:44:57.657Z] ✅ Fermeture SL SHORT BTC/USDT:USDT @ 59370.5953 | entrée 21:44:02 | durée 55 s | PnL=-8.78$ (brut -8.13$, frais -0.65$) | capital=1007.16$
 [2026-10-17T21:44:57.657Z] ✅ Fermeture TP LONG ETH/USDT:USDT @ 3377.0672 | entrée 21:41:47 | durée 3 min 10 s | PnL=+21.61$ (brut +22.26$, frais -0.64$) | capital=1028.77$
 [2026-10-17T21:44:57.657Z] ✅ Fermeture TP SHORT AVAX/USDT:USDT @ 32.0449 | entrée 21:41:27 | durée 3 min 30 s | PnL=+21.63$ (brut +22.26$, frais -0.63$) | capital=1050.40$
+[2026-10-17T21:45:47.699Z] ✅ Fermeture SL LONG SOL/USDT:USDT @ 140.6004 | entrée 21:44:12 | durée 1 min 35 s | PnL=-8.77$ (brut -8.13$, frais -0.65$) | capital=1041.63$
+[2026-10-17T21:46:47.747Z] 💹 Ouverture LONG ETH/USDT:USDT @ 3462.6556 | marge=83.33$ levier=10x expo=833.30$ | var=1.369% RSI=87.1
+[2026-10-17T21:47:07.768Z] 💹 Ouverture SHORT AVAX/USDT:USDT @ 30.9395 | marge=83.33$ levier=10x expo=833.30$ | var=-0.644% RSI=17.0
+[2026-10-17T21:47:47.804Z] ✅ Fermeture SL LONG ETH/USDT:USDT @ 3428.0291 | entrée 21:46:47 | durée 1 min | PnL=-9.00$ (brut -8.33$, frais -0.66$) | capital=1032.63$
+[2026-10-17T21:48:12.827Z] ✅ Fermeture SL SHORT AVAX/USDT:USDT @ 31.2489 | entrée 21:47:07 | durée 1 min 5 s | PnL=-9.00$ (brut -8.33$, frais -0.67$) | capital=1023.63$
+[2026-10-17T21:49:02.870Z] 💹 Ouverture LONG BTC/USDT:USDT @ 64729.9776 | marge=81.89$ levier=10x expo=818.90$ | var=2.648% RSI=99.7
+[2026-10-17T21:49:02.871Z] ✅ Fermeture TP LONG SUI/USDT:USDT @ 1.2336 | entrée 21:44:37 | durée 4 min 25 s | PnL=+22.10$ (brut +22.76$, frais -0.66$) | capital=1045.73$
+[2026-10-17T21:49:12.876Z] 💹 Ouverture SHORT SOL/USDT:USDT @ 139.1109 | marge=83.66$ levier=10x expo=836.58$ | var=-0.966% RSI=5.5
+[2026-10-17T21:49:37.906Z] 💹 Ouverture LONG SUI/USDT:USDT @ 1.2525 | marge=83.66$ levier=10x expo=836.58$ | var=1.803% RSI=98.2
+[2026-10-17T21:50:02.925Z] ✅ Fermeture TP LONG BTC/USDT:USDT @ 66542.4169 | entrée 21:49:02 | durée 1 min | PnL=+22.27$ (brut +22.93$, frais -0.66$) | capital=1067.99$
+[2026-10-17T21:51:27.994Z] ✅ Fermeture TP LONG SUI/USDT:USDT @ 1.2875 | entrée 21:49:37 | durée 1 min 50 s | PnL=+22.75$ (brut +23.42$, frais -0.68$) | capital=1090.74$
+[2026-10-17T21:51:48.012Z] 💹 Ouverture LONG ETH/USDT:USDT @ 3559.0401 | marge=87.26$ levier=10x expo=872.59$ | var=1.946% RSI=99.8
+[2026-10-17T21:51:48.013Z] ✅ Fermeture TP SHORT SOL/USDT:USDT @ 135.2158 | entrée 21:49:12 | durée 2 min 35 s | PnL=+22.76$ (brut +23.42$, frais -0.66$) | capital=1113.50$
+[2026-10-17T21:53:08.076Z] 💹 Ouverture SHORT AVAX/USDT:USDT @ 32.6195 | marge=89.08$ levier=10x expo=890.80$ | var=-0.623% RSI=15.7
