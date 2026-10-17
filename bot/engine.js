@@ -112,7 +112,7 @@ class TradingEngine {
    * @param {number} price  prix d'entrée (clôture dure de la bougie close)
    * @param {object} meta   { changePct, rsi } pour le log
    */
-  openPosition(symbol, side, price, meta = {}) {
+  async openPosition(symbol, side, price, meta = {}) {
     if (!this.canOpen(symbol)) return null;
     if (!(price > 0)) return null;
 
@@ -133,17 +133,44 @@ class TradingEngine {
       meta,
     };
 
+    // ----- Trading réel : on place l'ordre sur l'exchange AVANT d'enregistrer
+    // la position. En cas d'échec (clé API insuffisante, solde, réseau…),
+    // aucune position simulée n'est créée : le journal dit pourquoi. -----
+    if (typeof this.cfg.onOpen === 'function') {
+      let res;
+      try {
+        res = await this.cfg.onOpen({ symbol, side, price, qty, leverage });
+      } catch (e) {
+        this.log('ERROR', `⛔ Ordre RÉEL refusé (${side} ${symbol}) : ${e.message}. Position non ouverte.`);
+        return null;
+      }
+      if (res && res.entryPrice > 0) pos.entryPrice = res.entryPrice; // prix réel d'exécution
+      pos.orderId = res ? res.id ?? null : null;
+    }
+
     this.positions.set(symbol, pos);
     this.lastTradeTime.set(symbol, Date.now());
-    this.log('TRADE', `Ouverture ${side} ${symbol} @ ${price.toFixed(4)} | marge=${margin.toFixed(2)}$ levier=${leverage}x expo=${notional.toFixed(2)}$ | var=${meta.changePct?.toFixed(3)}% RSI=${meta.rsi?.toFixed(1)}`);
+    this.log('TRADE', `Ouverture ${side} ${symbol} @ ${pos.entryPrice.toFixed(4)} | marge=${margin.toFixed(2)}$ levier=${leverage}x expo=${notional.toFixed(2)}$ | var=${meta.changePct?.toFixed(3)}% RSI=${meta.rsi?.toFixed(1)}${pos.orderId ? ` | orderId=${pos.orderId}` : ''}`);
     return pos;
   }
 
   // ---------- sortie ----------
 
-  closePosition(symbol, price, reason) {
+  async closePosition(symbol, price, reason) {
     const pos = this.positions.get(symbol);
     if (!pos) return null;
+
+    // ----- Trading réel : l'ordre de clôture est envoyé AVANT d'inscrire le
+    // trade. Si l'exchange refuse, la position reste ouverte (on réessaiera
+    // au cycle suivant) et le journal explique l'échec. -----
+    if (typeof this.cfg.onClose === 'function') {
+      try {
+        await this.cfg.onClose({ symbol, side: pos.side, qty: pos.qty, price, reason });
+      } catch (e) {
+        this.log('ERROR', `⛔ Clôture RÉELLE refusée (${reason} ${pos.side} ${symbol}) : ${e.message}. Position conservée.`);
+        return null;
+      }
+    }
 
     // Frais taker estimés sur les deux jambes (entrée + sortie), assis sur le
     // volume réellement échangé (au moins le notionnel ouvert).
