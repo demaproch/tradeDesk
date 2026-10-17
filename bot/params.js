@@ -9,6 +9,7 @@ const TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '4h'];
 
 /** Groupes affichés dans le panneau « Paramètres » du dashboard */
 const PARAM_GROUPS = [
+  { id: 'markets',    title: 'Marché & paires', icon: '🪙' },
   { id: 'signal',     title: 'Signal d\'entrée', icon: '📡' },
   { id: 'money',      title: 'Money management', icon: '💰' },
   { id: 'exits',      title: 'Sorties TP / SL', icon: '🎯' },
@@ -21,6 +22,7 @@ const PARAM_GROUPS = [
  *        unité affichée et aide contextuelle.
  */
 const PARAM_SCHEMA = {
+  symbols:          { type: 'symbols', label: 'Paires à trader', unit: '', group: 'markets', order: 'core', help: 'Cases activées = paires surveillées et tradées par le bot. Les positions ouvertes restent gérées même si la paire est décochée.' },
   timeframe:        { type: 'enum', values: TIMEFRAMES, label: 'Timeframe', group: 'execution', order: 'core', help: 'Intervalle des bougies analysées.' },
   minMovePct:       { type: 'float', min: 0.01,         max: 50,         label: 'Variation minimale', unit: '%', step: 0.05, group: 'signal', order: 'core', help: 'Mouvement de prix requis sur les N dernières bougies (momentum).' },
   rsiLongMin:       { type: 'float', min: 0,            max: 100,        label: 'RSI — seuil LONG', unit: '', step: 0.5, group: 'signal', order: 'core', help: 'LONG ouvert si RSI strictement au-dessus de ce seuil.' },
@@ -35,6 +37,62 @@ const PARAM_SCHEMA = {
   cooldownMs:       { type: 'int',   min: 0,            max: 24 * 3600_000, label: 'Cooldown', unit: 'ms', step: 30_000, group: 'execution', order: 'advanced', help: 'Délai minimum entre deux trades sur un même symbole.' },
   feePct:           { type: 'float', min: 0,            max: 1,           label: 'Frais par jambe', unit: '%', step: 0.01, group: 'execution', order: 'core', help: 'Frais taker estimés appliqués à l\'entrée ET à la sortie de chaque trade (0 = ignore les frais).' },
 };
+
+/** Paires proposées au dashboard : univers connu + paires actuellement actives */
+const KNOWN_SYMBOLS = [
+  'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'AVAX/USDT:USDT', 'SUI/USDT:USDT',
+  'BNB/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 'LINK/USDT:USDT', 'APT/USDT:USDT',
+  'ARB/USDT:USDT', 'OP/USDT:USDT', 'NEAR/USDT:USDT', 'TIA/USDT:USDT', 'SEI/USDT:USDT',
+];
+function symbolUniverse(currentSymbols) {
+  return [...new Set([...(currentSymbols || []), ...KNOWN_SYMBOLS])];
+}
+
+/** Symbole Binance perpetual USDT correspondant à une paire (ex. BTC/USDT:USDT -> BTCUSDT). */
+function perpSymbol(sym) {
+  return String(sym).split(':')[0].replace('/', '');
+}
+
+/** Vérifie que le marché existe sur l'exchange chargé ; sinon erreur explicite. */
+async function validateSymbolOnExchange(exchange, sym) {
+  try {
+    await exchange.loadMarkets();
+    if (exchange.markets && exchange.markets[sym]) return null;
+    // tentative de normalisation via ccxt
+    try {
+      const m = exchange.market(sym);
+      if (m && m.symbol) return null;
+    } catch (_) { /* inconnu */ }
+    return `Marché inconnu sur ${exchange.id} : « ${sym} »`;
+  } catch (e) {
+    // impossible de vérifier (réseau…) : on n'ajoute pas un marché non vérifié pour autant
+    return `Vérification du marché « ${sym} » impossible (${e.message}). Réessaie quand la connexion est rétablie.`;
+  }
+}
+
+/**
+ * Valide une liste de paires (tableau ou chaîne séparée par des virgules).
+ * @returns {{ok:boolean, error?:string, value?:string[]}}
+ */
+function normalizeSymbols(raw) {
+  let list = raw;
+  if (typeof raw === 'string') list = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!Array.isArray(list)) return { ok: false, error: 'Paires : format invalide.' };
+  const seen = new Set();
+  const out = [];
+  for (let s of list) {
+    s = String(s).trim().toUpperCase();
+    if (!s) continue;
+    if (!/:USDT$/.test(s)) s += ':USDT'; // accepte "BTC/USDT" -> "BTC/USDT:USDT"
+    if (!/^[A-Z0-9]+\/USDT:USDT$/.test(s)) {
+      return { ok: false, error: `Paire invalide : « ${s} » (format attendu BASE/USDT:USDT, ex. BTC/USDT:USDT)` };
+    }
+    if (!seen.has(s)) { seen.add(s); out.push(s); }
+  }
+  if (out.length === 0) return { ok: false, error: 'Au moins une paire doit être sélectionnée.' };
+  if (out.length > 20) return { ok: false, error: 'Maximum 20 paires (garde-fous : requêtes API et clarté du dashboard).' };
+  return { ok: true, value: out };
+}
 
 // Garde-fous de cohérence entre paramètres croisés
 function checkCoherence(cfg) {
@@ -76,6 +134,13 @@ function validatePatch(patch, currentCfg) {
       continue;
     }
 
+    if (spec.type === 'symbols') {
+      const norm = normalizeSymbols(raw);
+      if (!norm.ok) { errors.push(norm.error); continue; }
+      changes[key] = norm.value;
+      continue;
+    }
+
     const num = Number(raw);
     if (!Number.isFinite(num)) {
       errors.push(`${spec.label || key} : « ${raw} » n'est pas un nombre`);
@@ -108,4 +173,4 @@ function editableKeys() {
   return Object.keys(PARAM_SCHEMA);
 }
 
-module.exports = { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, validatePatch, checkCoherence, editableKeys };
+module.exports = { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, KNOWN_SYMBOLS, validatePatch, checkCoherence, editableKeys, normalizeSymbols, symbolUniverse, perpSymbol, validateSymbolOnExchange };

@@ -199,6 +199,21 @@
 
   /* ---------- Signals ---------- */
   .sig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 12px; }
+  .sym-checks { display: flex; flex-wrap: wrap; gap: 7px; }
+  .sym-checks.dirty { outline: 1px solid var(--warn, #e0a458); outline-offset: 4px; border-radius: 8px; }
+  .sym-check {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px;
+    font: 600 11.5px 'JetBrains Mono', monospace; color: var(--muted);
+    background: var(--bg-soft); transition: all .15s;
+  }
+  .sym-check:hover { border-color: var(--accent); color: var(--fg); }
+  .sym-check input { accent-color: var(--accent); margin: 0; cursor: pointer; }
+  .sym-check:has(input:checked) { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,.08); }
+  .sym-checks input[type=text], #sym_custom {
+    width: 100%; background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--fg); padding: 6px 10px; font-size: 12px;
+  }
   .sig {
     border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
     background: var(--bg-soft); display: flex; flex-direction: column; gap: 5px;
@@ -529,11 +544,13 @@ function renderTimeframes() {
 function renderSignals() {
   const grid = document.getElementById('sigGrid');
   const sigs = STATE.signals || {};
-  const keys = Object.keys(sigs);
+  const tracked = STATE.params?.symbols || SCHEMA.symbols || [];
+  // cartes pour toutes les paires suivies (même sans signal reçu pour l'instant) + celles en position
+  const keys = [...new Set([...tracked, ...Object.keys(sigs), ...STATE.positions.map(p => p.symbol)])];
   if (!keys.length) return;
   const P = currentParams();
   grid.innerHTML = keys.map(sym => {
-    const x = sigs[sym];
+    const x = sigs[sym] || {};
     let verdict = '— NEUTRE', cls = 'v-none', cardCls = '';
     if (x.changePct != null && x.rsi != null) {
       if (x.changePct > P.minMovePct && x.rsi > P.rsiLongMin) { verdict = 'LONG ▲'; cls = 'v-long'; cardCls = 'on-long'; }
@@ -789,6 +806,18 @@ function updateParamsSummary() {
   for (const k of ALL_KEYS()) {
     const spec = SCHEMA.spec[k];
     if (spec.order === 'advanced') continue;   // only key params in summary
+    if (k === 'symbols') {
+      const formEl = document.getElementById('in_symbols');
+      let v = serverValue('symbols') || [];
+      if (formEl) {
+        const iv = symList();
+        const diff = iv.length !== v.length || iv.some(s => !v.includes(s));
+        if (diff) dirtyCount++;
+        v = iv;
+      }
+      chips.push(`<span class="chip">${spec.label} <b>${v.map(shortSym).join(' · ')}</b></span>`);
+      continue;
+    }
     const formEl = document.getElementById('in_' + k);
     let v = serverValue(k);
     if (formEl) {
@@ -830,6 +859,35 @@ function mkField(k) {
   const spec = SCHEMA.spec[k];
   const div = document.createElement('div');
   div.className = 'field';
+  if (spec.type === 'symbols') {
+    // Cases à cocher : univers de paires connues + champ libre pour une paire exotique
+    div.innerHTML = `<label>${spec.label}<span class="def">sélection active : ${(SCHEMA.params.symbols || []).length}</span></label>
+      <div class="sym-checks" id="in_${k}" data-symchecks></div>
+      <input type="text" id="sym_custom" placeholder="Ajouter une paire exotique, ex. TON/USDT:USDT" style="margin-top:8px" />
+      <div class="hint">${spec.help || ''} · max 20 paires</div>`;
+    renderSymChecks(div.querySelector('[data-symchecks]'), [...new Set([...(SCHEMA.symbolUniverse || []), ...(SCHEMA.params.symbols || [])])]);
+    const custom = div.querySelector('#sym_custom');
+    custom.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const raw = custom.value.trim().toUpperCase();
+      if (!raw) return;
+      const sym = raw.includes('/') ? (raw.endsWith(':USDT') ? raw : raw + ':USDT') : raw.split(':')[0] + '/USDT:USDT';
+      const wrap = div.querySelector('[data-symchecks]');
+      if (!wrap.querySelector(`input[value="${sym}"]`)) {
+        const lab = document.createElement('label');
+        lab.className = 'sym-check';
+        lab.innerHTML = `<input type="checkbox" value="${sym}" /><span>${shortSym(sym)}</span>`;
+        lab.querySelector('input').addEventListener('change', updateDirty);
+        wrap.appendChild(lab);
+      }
+      const box = wrap.querySelector(`input[value="${sym}"]`);
+      box.checked = true;
+      custom.value = '';
+      updateDirty();
+    });
+    return div;
+  }
   if (spec.type === 'enum') {
     div.innerHTML = `<label>${spec.label}</label>
       <select id="in_${k}" name="${k}">${spec.values.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
@@ -848,9 +906,33 @@ function mkField(k) {
   return div;
 }
 
+// ---------- champ « paires » (cases à cocher) ----------
+function renderSymChecks(wrap, universe) {
+  wrap.innerHTML = '';
+  for (const sym of universe) {
+    const lab = document.createElement('label');
+    lab.className = 'sym-check';
+    lab.innerHTML = `<input type="checkbox" value="${sym}" /><span>${shortSym(sym)}</span>`;
+    lab.querySelector('input').addEventListener('change', updateDirty);
+    wrap.appendChild(lab);
+  }
+}
+
+function symBoxes() {
+  return [...document.querySelectorAll('#in_symbols input[type=checkbox]')];
+}
+function symList() {
+  return symBoxes().filter(b => b.checked).map(b => b.value);
+}
+
 function syncSettingsValues() {
   if (!SCHEMA || !STATE) return;
   for (const k of ALL_KEYS()) {
+    if (k === 'symbols') {
+      const cur = serverValue('symbols') || [];
+      symBoxes().forEach(b => { b.checked = cur.includes(b.value); });
+      continue;
+    }
     const el = document.getElementById('in_' + k);
     if (!el || el === document.activeElement) continue; // ne pas écraser la saisie en cours
     el.value = serverValue(k);
@@ -859,10 +941,13 @@ function syncSettingsValues() {
 
 function serverValue(k) {
   if (!STATE) return null;
-  return k === 'timeframe' ? STATE.timeframe : (STATE.params ? STATE.params[k] : SCHEMA?.params?.[k]);
+  if (k === 'timeframe') return STATE.timeframe;
+  const src = STATE.params ? STATE.params[k] : SCHEMA?.params?.[k];
+  return k === 'symbols' ? [...(src || [])] : src;
 }
 
 function inputValue(el, k) {
+  if (SCHEMA.spec[k].type === 'symbols') return symList();
   if (SCHEMA.spec[k].type === 'enum') return el.value;
   return el.value === '' ? NaN : Number(el.value);
 }
@@ -871,10 +956,18 @@ function updateDirty() {
   if (!SCHEMA) return;
   let n = 0;
   for (const k of ALL_KEYS()) {
-    const el = document.getElementById('in_' + k);
-    if (!el) continue;
-    const dirty = inputValue(el, k) !== serverValue(k);
-    el.classList.toggle('dirty', dirty);
+    let dirty;
+    if (k === 'symbols') {
+      const a = symList(), b = serverValue('symbols') || [];
+      dirty = a.length !== b.length || a.some(s => !b.includes(s));
+      const wrap = document.getElementById('in_symbols');
+      if (wrap) wrap.classList.toggle('dirty', dirty);
+    } else {
+      const el = document.getElementById('in_' + k);
+      if (!el) continue;
+      dirty = inputValue(el, k) !== serverValue(k);
+      el.classList.toggle('dirty', dirty);
+    }
     if (dirty) n++;
   }
   const badge = document.getElementById('dirtyBadge');
@@ -911,6 +1004,11 @@ function updatePreview() {
 function collectPatch() {
   const patch = {};
   for (const k of ALL_KEYS()) {
+    if (k === 'symbols') {
+      const a = symList(), b = serverValue('symbols') || [];
+      if (a.length !== b.length || a.some(s => !b.includes(s))) patch[k] = a;
+      continue;
+    }
     const el = document.getElementById('in_' + k);
     if (!el) continue;
     const val = inputValue(el, k);

@@ -272,7 +272,7 @@ class TradingEngine {
 
     // cooldown restant par symbole (affiché dans les cartes de signaux)
     const cooldowns = {};
-    for (const sym of this.cfg.symbols) cooldowns[sym] = this.cooldownLeft(sym);
+    for (const sym of new Set([...this.cfg.symbols, ...this.positions.keys()])) cooldowns[sym] = this.cooldownLeft(sym);
 
     const positions = [...this.positions.values()].map((p) => {
       const price = pricesBySymbol[p.symbol] ?? p.entryPrice;

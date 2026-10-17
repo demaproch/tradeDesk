@@ -241,4 +241,21 @@ t('historique d\'équité reconstruit = capital initial + Σ PnL réalisés uniq
   for (const p of e.equityHistory) assert.ok(p.equity <= 1022.4 + 1e-9 && p.equity >= CONFIG.initialCapital - 1e-9);
 });
 
+// ---------- Sélection des paires via le dashboard ----------
+const { normalizeSymbols, validatePatch: vp2, symbolUniverse } = require('./params');
+t('normalizeSymbols : accepte BTC/USDT et ajoute :USDT', () => assert.deepStrictEqual(normalizeSymbols(['BTC/USDT']).value, ['BTC/USDT:USDT']));
+t('normalizeSymbols : chaîne CSV + dédoublonnage', () => assert.deepStrictEqual(normalizeSymbols('btc/usdt:usdt, ETH/USDT:usdt ,BTC/USDT:USDT').value, ['BTC/USDT:USDT','ETH/USDT:USDT']));
+t('normalizeSymbols : refuse liste vide', () => assert.strictEqual(normalizeSymbols([]).ok, false));
+t('normalizeSymbols : refuse format invalide', () => assert.strictEqual(normalizeSymbols(['FAKE']).ok, false));
+t('validatePatch symboles : valide', () => { const r = vp2({ symbols: ['BTC/USDT:USDT'] }, CONFIG); assert.ok(r.ok); assert.deepStrictEqual(r.changes.symbols, ['BTC/USDT:USDT']); });
+t('validatePatch symboles : vide rejeté', () => assert.strictEqual(vp2({ symbols: [] }, CONFIG).ok, false));
+t('symbolUniverse : contient les actives en premier', () => { const u = symbolUniverse(['TON/USDT:USDT']); assert.strictEqual(u[0], 'TON/USDT:USDT'); assert.ok(u.includes('BTC/USDT:USDT')); });
+t('snapshot cooldowns inclut les paires en position hors sélection', () => {
+  const cfg = { ...CONFIG, symbols: ['BTC/USDT:USDT'] };
+  const e = new TradingEngine(cfg);
+  e.openPosition('ETH/USDT:USDT', 'LONG', 3000);
+  const snap = e.snapshot({});
+  assert.ok('ETH/USDT:USDT' in snap.cooldowns && 'BTC/USDT:USDT' in snap.cooldowns);
+});
+
 console.log(`\n${passed} tests passés${process.exitCode ? ' — ÉCHECS DÉTECTÉS' : ' — tout est vert 🟢'}\n`);
