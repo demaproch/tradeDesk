@@ -32,7 +32,10 @@ const CONFIG = {
   initialCapital: 1000,           // capital de départ simulé ($)
   riskPct: 8,                     // risque = 8% du capital par trade
   leverage: 10,                   // levier utilisé
-  maxLeverage: 12,                // levier plafond
+  maxLeverage: 12,                // levier plafond (paper ; bridé à 5x en mode réel)
+
+  // --- Mode de trading ---
+  tradingMode: 'paper',           // 'paper' (simulation) | 'real' (ordres sur l'exchange via clés API du coffre)
 
   // --- Sorties (TP / SL fixes, pas de trailing) ---
   takeProfitPct: 2.8,             // TP : +2.8% de mouvement du prix

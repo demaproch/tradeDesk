@@ -207,11 +207,11 @@ class TradingEngine {
     return trade;
   }
 
-  /** Fermeture manuelle (bouton du dashboard) */
-  closeAll(priceFn) {
+  /** Fermeture manuelle (bouton du dashboard) — async car hooks réels. */
+  async closeAll(priceFn) {
     for (const [sym, pos] of [...this.positions]) {
       const price = priceFn ? priceFn(sym, pos.entryPrice) : pos.entryPrice;
-      this.closePosition(sym, price, 'MANUAL');
+      await this.closePosition(sym, price, 'MANUAL');
     }
   }
 
@@ -248,6 +248,20 @@ class TradingEngine {
   recordEquity(pricesBySymbol) {
     this.equityHistory.push({ t: Date.now(), equity: this.equity(pricesBySymbol) });
     if (this.equityHistory.length > 2000) this.equityHistory.shift();
+  }
+
+  /**
+   * Réinitialise le carnet paper avec un nouveau capital de départ :
+   * positions clôturées virtuellement au prix d'entrée, historique effacé.
+   * À n'appeler qu'en mode paper (le bot refuse sinon).
+   */
+  resetBook(newCapital) {
+    for (const [sym, pos] of [...this.positions]) this.positions.delete(sym);
+    this.capital = newCapital;
+    this.closedTrades = [];
+    this.lastTradeTime.clear();
+    this.equityHistory = [{ t: Date.now(), equity: newCapital }];
+    this.log('INFO', `Carnet réinitialisé : nouveau capital=${newCapital}$`);
   }
 
   /**

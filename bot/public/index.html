@@ -148,8 +148,16 @@
     border-top: 6px solid var(--muted); transition: transform .22s ease;
   }
   .card.collapsed .chev { transform: rotate(-90deg); }
-  .card.collapsed .card-body.settings-body { display: none; }
+  .card.collapsed .card-body.settings-body,
+  .card.collapsed .card-body.keys-body { display: none; }
   .card.collapsed .card-head { border-bottom: none; }
+  .keys-summary {
+    display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
+    border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);
+  }
+  .card.collapsed .keys-summary { display: flex; }
+  /* Sécurité : quand le panneau est replié, les puces de résumé sont masquées (flou) pour ne rien exposer */
+  #keysCard.card.collapsed .keys-summary { display: none; }
   .params-summary {
     display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
     border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);
@@ -320,10 +328,12 @@
       </div>
     </div>
     <div id="connPill" class="status-pill stopped"><span class="dot"></span><span id="connTxt">Connexion…</span></div>
+    <div id="modePill" class="status-pill" style="display:none" title="Mode de trading actuel"></div>
     <div id="demoPill" class="status-pill badge-demo" style="display:none">🧪 DÉMO</div>
     <button id="btnToggle" class="btn btn-primary" onclick="toggleBot()">▶ Démarrer</button>
     <button id="btnPause" class="btn btn-ghost" style="display:none" onclick="togglePause()">⏸ Pause</button>
     <button class="btn btn-danger" onclick="closeAll()">✕ Fermer tout</button>
+    <button class="btn btn-ghost" onclick="logout()" title="Se déconnecter du dashboard">🚪</button>
   </div>
 </header>
 
@@ -411,6 +421,57 @@
         </div>
       </section>
 
+      <!-- Clés API & sécurité -->
+      <section class="card" id="keysCard">
+        <div class="card-head clickable" onclick="toggleKeys(event)" title="Cliquer pour replier / déplier">
+          <h2>🔐 Clés API &amp; sécurité <span class="chev"></span></h2>
+          <span id="keyStatusChip" style="font-size:10.5px;color:var(--muted)">—</span>
+        </div>
+        <div class="keys-summary" id="keysSummary"></div>
+        <div class="card-body settings-body keys-body" style="display:grid;gap:12px">
+          <div style="font-size:12px;color:var(--muted);line-height:1.5">
+            Mode actuel : <b id="modeNow" style="color:var(--text)">paper</b> · levier réel bridé à <b id="maxLevReal">5x</b>.
+            Les clés sont chiffrées (AES-256-GCM) dans <code>secrets.json</code> et ne quittent jamais le serveur. Privilégie une clé API sans droit de retrait.
+          </div>
+
+          <div id="keysFormSet">
+            <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px">Clé API (exchange)</label>
+            <input type="text" id="inpApiKey" placeholder="ex. A1b2C3…" autocomplete="off" style="width:100%;padding:9px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.35);color:#fff;font-size:13px;outline:none" />
+            <label style="display:block;font-size:11px;color:var(--muted);margin:8px 0 4px">Secret API</label>
+            <input type="password" id="inpApiSecret" placeholder="••••••••" autocomplete="new-password" style="width:100%;padding:9px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.35);color:#fff;font-size:13px;outline:none" />
+            <label style="display:block;font-size:11px;color:var(--muted);margin:8px 0 4px">Mot de passe maître (chiffre le coffre — non récupérable s'il est perdu)</label>
+            <input type="password" id="inpMaster1" placeholder="min. 8 caractères" autocomplete="new-password" style="width:100%;padding:9px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.35);color:#fff;font-size:13px;outline:none" />
+            <label style="display:block;font-size:11px;color:var(--muted);margin:8px 0 4px">Confirmer le mot de passe maître</label>
+            <input type="password" id="inpMaster2" placeholder="••••••••" autocomplete="new-password" style="width:100%;padding:9px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.35);color:#fff;font-size:13px;outline:none" />
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="saveKeys()">💾 Enregistrer les clés</button>
+            </div>
+          </div>
+
+          <div id="keysFormUnlock" style="display:none">
+            <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px">Mot de passe maître (coffre verrouillé)</label>
+            <input type="password" id="inpMasterUnlock" placeholder="déverrouiller le coffre" autocomplete="new-password" style="width:100%;padding:9px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.35);color:#fff;font-size:13px;outline:none" />
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="unlockKeys()">🔓 Déverrouiller</button>
+              <button class="btn btn-danger" onclick="eraseKeys()">🗑️ Effacer les clés</button>
+            </div>
+          </div>
+
+          <div id="keysUnlockedBox" style="display:none">
+            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Coffre déverrouillé · clé <b id="keyIdTxt" class="mono" style="color:var(--text)"></b></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="enableRealMode()">🔴 Activer le trading RÉEL</button>
+              <button class="btn" onclick="testKeys()" id="btnTestKeys" style="display:none">🧪 Tester la connexion</button>
+              <button class="btn" onclick="lockKeys()">🔒 Verrouiller</button>
+              <button class="btn btn-danger" onclick="disableRealMode()" id="btnPaper" style="display:none">🧪 Revenir en paper</button>
+              <button class="btn btn-danger" onclick="eraseKeys()">🗑️ Effacer</button>
+            </div>
+          </div>
+
+          <div class="save-msg" id="keyMsg"></div>
+        </div>
+      </section>
+
       <section class="card">
         <div class="card-head"><h2>🗒️ Journal</h2></div>
         <div class="card-body scroll-y" id="logBox" style="max-height:430px;padding-top:6px"><div class="empty">Vide</div></div>
@@ -454,11 +515,13 @@ function toast(msg, isErr = false) {
 }
 
 // ==================== Connexion WS ====================
+let CSRF = sessionStorage.getItem('mombot_csrf') || '';
+
 function connect() {
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
   ws.onopen = () => setConn(true);
   ws.onmessage = (ev) => { STATE = JSON.parse(ev.data); render(); };
-  ws.onclose = () => { setConn(false); setTimeout(connect, 2000); };
+  ws.onclose = (ev) => { if (ev.code === 4401) { location.href = '/login'; return; } setConn(false); setTimeout(connect, 2000); };
   ws.onerror = () => ws.close();
 }
 function setConn(ok) {
@@ -520,6 +583,7 @@ function renderAll() {
   document.getElementById('demoPill').style.display = STATE.demo ? '' : 'none';
 
   renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); drawChart();
+  renderSecurity();
 }
 
 function currentParams() {
@@ -797,6 +861,34 @@ function toggleParams(e) {
   try { localStorage.setItem(PARAMS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
 }
 
+// ==================== Panneau Clés API & sécurité repliable ====================
+const KEYS_COLLAPSE_KEY = 'keysCardCollapsed';
+
+function toggleKeys(e) {
+  if (e && e.target.closest('button, a, input, select')) return;
+  const card = document.getElementById('keysCard');
+  const collapsed = !card.classList.contains('collapsed');
+  card.classList.toggle('collapsed', collapsed);
+  try { localStorage.setItem(KEYS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
+  updateKeysSummary();
+}
+
+// Résumé affiché quand le panneau est replié : mode + état du coffre en un coup d'œil
+function updateKeysSummary() {
+  const el = document.getElementById('keysSummary');
+  if (!el || !STATE || !STATE.security) return;
+  const sec = STATE.security, keys = sec.keys || {};
+  const chips = [];
+  chips.push(sec.tradingMode === 'real'
+    ? '<span class="chip" style="color:#fda4af;border-color:rgba(251,113,133,.4)">🔴 RÉEL</span>'
+    : '<span class="chip">🧪 Paper</span>');
+  chips.push(`<span class="chip">Levier réel <b>${sec.maxLeverageReal ?? 5}x</b></span>`);
+  if (!keys.configured) chips.push('<span class="chip">Aucune clé</span>');
+  else if (keys.unlocked) chips.push(`<span class="chip">🔓 Coffre déverrouillé · <b>${keys.keyId}</b></span>`);
+  else chips.push(`<span class="chip">🔒 Coffre verrouillé · <b>${keys.keyId}</b></span>`);
+  el.innerHTML = chips.join('');
+}
+
 // Résumé affiché quand le panneau est replié ; badge « non appliquées » si ébauche en cours
 function updateParamsSummary() {
   const el = document.getElementById('paramsSummary');
@@ -1057,12 +1149,125 @@ function setTimeframe(tf) {
 
 // ==================== Actions ====================
 async function postJson(url, body) {
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const j = await r.json();
+  let r;
+  try {
+    r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(CSRF ? { 'X-CSRF-Token': CSRF } : {}) },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
+  } catch (e) { toast('⚠️ Serveur injoignable — vérifie que le bot tourne.', true); return {}; }
+  if (r.status === 401) { location.href = '/login'; return {}; }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok && j.error) toast('⚠️ ' + j.error, true);   // ex. « Jeton CSRF manquant », « Bot non démarré »
   if (j.state) STATE = j.state;
   if (STATE) render();
   return j;
 }
+
+// ---------- Coffre à clés API & mode réel ----------
+function keyMsg(text, ok) {
+  const el = document.getElementById('keyMsg');
+  el.className = 'save-msg ' + (ok ? 'ok' : 'err');
+  el.textContent = text;
+}
+
+function renderSecurity() {
+  const sec = STATE?.security || SCHEMA?.security || {};
+  const keys = sec.keys || { configured: false, unlocked: false, keyId: null };
+  // pillule de mode dans le header
+  const pill = document.getElementById('modePill');
+  if (sec.tradingMode === 'real') {
+    pill.style.display = '';
+    pill.innerHTML = `<span class="dot"></span>${sec.realActive ? '🔴 LIVE' : '🔴 LIVE (hors ligne)'}`;
+    pill.style.color = '#fda4af';
+    pill.style.borderColor = 'rgba(251,113,133,.4)';
+  } else {
+    pill.style.display = '';
+    pill.innerHTML = '<span class="dot"></span>🧪 PAPER';
+    pill.style.color = '#7dd3fc';
+    pill.style.borderColor = 'rgba(125,211,252,.3)';
+  }
+  document.getElementById('modeNow').textContent = sec.tradingMode === 'real' ? 'RÉEL (ordres envoyés)' : 'paper (simulation)';
+  document.getElementById('maxLevReal').textContent = (sec.maxLeverageReal ?? 5) + 'x';
+  document.getElementById('keyStatusChip').textContent =
+    !keys.configured ? 'aucune clé enregistrée' : (keys.unlocked ? `coffre déverrouillé · ${keys.keyId}` : `coffre verrouillé · ${keys.keyId}`);
+  // blocs du panneau
+  document.getElementById('keysFormSet').style.display = keys.configured ? 'none' : '';
+  document.getElementById('keysFormUnlock').style.display = (keys.configured && !keys.unlocked) ? '' : 'none';
+  document.getElementById('keysUnlockedBox').style.display = keys.unlocked ? '' : 'none';
+  document.getElementById('keyIdTxt').textContent = keys.keyId || '';
+  document.getElementById('btnTestKeys').style.display = sec.realActive ? '' : 'none';
+  document.getElementById('btnPaper').style.display = sec.tradingMode === 'real' ? '' : 'none';
+  updateKeysSummary();
+}
+
+async function saveKeys() {
+  const apiKey = document.getElementById('inpApiKey').value.trim();
+  const apiSecret = document.getElementById('inpApiSecret').value.trim();
+  const m1 = document.getElementById('inpMaster1').value;
+  const m2 = document.getElementById('inpMaster2').value;
+  if (!apiKey || !apiSecret) return keyMsg('❌ Renseigne la clé API et le secret.', false);
+  if (m1.length < 8) return keyMsg('❌ Mot de passe maître trop court (8 caractères min).', false);
+  if (m1 !== m2) return keyMsg('❌ Les deux mots de passe maîtres diffèrent.', false);
+  keyMsg('Enregistrement + vérification des clés sur l\'exchange…', true);
+  const res = await postJson('/api/keys/set', { apiKey, apiSecret, master: m1 });
+  if (res.ok) {
+    ['inpApiKey', 'inpApiSecret', 'inpMaster1', 'inpMaster2'].forEach(id => document.getElementById(id).value = '');
+    keyMsg('✅ Clés enregistrées (chiffrées) et validées sur l\'exchange.', true);
+    toast('Clés API enregistrées ✅');
+  } else keyMsg('❌ ' + (res.error || 'Échec.'), false);
+}
+
+async function unlockKeys() {
+  const master = document.getElementById('inpMasterUnlock').value;
+  if (!master) return keyMsg('❌ Saisis le mot de passe maître.', false);
+  const res = await postJson('/api/keys/unlock', { master });
+  if (res.ok) { document.getElementById('inpMasterUnlock').value = ''; keyMsg('🔓 Coffre déverrouillé pour cette session.', true); }
+  else keyMsg('❌ ' + (res.error || 'Mot de passe maître incorrect.'), false);
+}
+
+async function lockKeys() {
+  const res = await postJson('/api/keys/lock', {});
+  keyMsg(res.ok ? '🔒 Coffre verrouillé.' : '❌ ' + (res.error || 'Échec.'), !!res.ok);
+}
+
+async function eraseKeys() {
+  if (!confirm('Effacer définitivement les clés API chiffrées ? Tu devras les ressaisir (ou les régénérer côté exchange).')) return;
+  const res = await postJson('/api/keys/erase', {});
+  keyMsg(res.ok ? '🗑️ Clés effacées.' : '❌ ' + (res.error || 'Échec.'), !!res.ok);
+}
+
+async function enableRealMode() {
+  if (!confirm('⚠️ MODE RÉEL : le bot enverra de VRAIS ordres avec de l\'argent réel sur ton compte exchange.\n\nConfirmer l\'activation ?')) return;
+  const res = await postJson('/api/params', { tradingMode: 'real' });
+  if (res.ok) { keyMsg('🔴 Mode RÉEL activé — les ordres sont envoyés sur l\'exchange.', true); toast('MODE RÉEL ACTIVÉ 🔴'); }
+  else { keyMsg('❌ ' + (res.error || 'Activation refusée.'), false); toast('Mode réel refusé', true); }
+}
+
+async function disableRealMode() {
+  const res = await postJson('/api/params', { tradingMode: 'paper' });
+  if (res.ok) { keyMsg('🧪 Retour au mode paper (simulation).', true); toast('Repassé en paper 🧪'); }
+  else keyMsg('❌ ' + (res.error || 'Échec.'), false);
+}
+
+async function testKeys() {
+  keyMsg('Test de connexion…', true);
+  const res = await postJson('/api/keys/test', {});
+  if (res.ok) keyMsg(`✅ Exchange joignable · ${res.assets} actif(s) · solde ≈ $${res.usdApprox}`, true);
+  else keyMsg('❌ ' + (res.error || 'Test échoué.'), false);
+}
+
+async function logout() {
+  await fetch('/api/logout', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(CSRF ? { 'X-CSRF-Token': CSRF } : {}) },
+  }).catch(() => {});
+  sessionStorage.removeItem('mombot_csrf');
+  location.href = '/login';
+}
+
 function toggleBot() { postJson(STATE?.running ? '/api/stop' : '/api/start', {}); }
 function togglePause() { postJson('/api/pause', { paused: !STATE.paused }); }
 function closeAll() { if (confirm('Fermer toutes les positions au prix courant ?')) postJson('/api/closeall', {}); }
@@ -1071,13 +1276,25 @@ function closePosition(encSym) {
   if (confirm(`Fermer la position ${shortSym(sym)} au prix courant ?`)) postJson('/api/close/' + encSym, {});
 }
 
-ensureSchema().catch(() => {});
-connect();
+// Vérification de session (récupère le jeton CSRF si absent) puis démarrage.
+(async function boot() {
+  try {
+    const r = await fetch('/api/me', { credentials: 'same-origin' });
+    if (r.status === 401) { location.href = '/login'; return; }
+    const j = await r.json().catch(() => ({}));
+    if (j.csrf) { CSRF = j.csrf; sessionStorage.setItem('mombot_csrf', CSRF); }
+  } catch (_) { /* réseau : on tente quand même */ }
+  ensureSchema().then(() => renderSecurity()).catch(() => {});
+  connect();
+})();
 
-// Restaurer l'état replié/déplié du panneau paramètres (mémoire navigateur)
+// Restaurer l'état replié/déplié des panneaux (mémoire navigateur)
 try {
   if (localStorage.getItem(PARAMS_COLLAPSE_KEY) === '1') {
     document.getElementById('paramsCard').classList.add('collapsed');
+  }
+  if (localStorage.getItem(KEYS_COLLAPSE_KEY) === '1') {
+    document.getElementById('keysCard').classList.add('collapsed');
   }
 } catch (_) {}
 </script>

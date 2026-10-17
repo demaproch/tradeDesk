@@ -1,0 +1,56 @@
+💾 Overrides de paramètres chargés (12 clé(s)).
+🧪 Mode DÉMO : marché simulé (pas besoin d'internet).
+📊 Dashboard : http://localhost:3000 (protégé par mot de passe)
+[2026-10-17T21:28:41.915Z] ℹ️ Bot démarré | timeframe=5m | cycle=5s | capital=1000.00$ | frais=0.04%/jambe
+[2026-10-17T21:28:41.917Z] 💹 Ouverture LONG SUI/USDT:USDT @ 1.2017 | marge=80.00$ levier=10x expo=800.00$ | var=0.728% RSI=77.9
+[2026-10-17T21:28:46.759Z] ℹ️ Bot arrêté.
+[2026-10-17T21:28:46.785Z] ✅ Fermeture MANUAL LONG SUI/USDT:USDT @ 1.2017 | entrée 21:28:41 | durée 5 s | PnL=-0.64$ (brut +0.00$, frais -0.64$) | capital=999.36$
+[2026-10-17T21:28:46.793Z] ℹ️ Bot démarré | timeframe=5m | cycle=5s | capital=999.36$ | frais=0.04%/jambe
+[2026-10-17T21:28:51.153Z] ℹ️ ⏸ Bot en pause.
+[2026-10-17T21:28:51.174Z] ℹ️ ▶ Bot repris.
+[2026-10-17T21:29:01.805Z] 💹 Ouverture LONG BTC/USDT:USDT @ 65523.4957 | marge=79.95$ levier=10x expo=799.49$ | var=0.618% RSI=77.9
+[2026-10-17T21:29:11.815Z] 💹 Ouverture SHORT SOL/USDT:USDT @ 151.2191 | marge=79.95$ levier=10x expo=799.49$ | var=-0.667% RSI=15.3
+[2026-10-17T21:30:26.891Z] ✅ Fermeture SL SHORT SOL/USDT:USDT @ 152.7313 | entrée 21:29:11 | durée 1 min 15 s | PnL=-8.64$ (brut -7.99$, frais -0.64$) | capital=990.72$
+[2026-10-17T21:30:46.912Z] ✅ Fermeture SL LONG BTC/USDT:USDT @ 64868.2607 | entrée 21:29:01 | durée 1 min 45 s | PnL=-8.63$ (brut -7.99$, frais -0.64$) | capital=982.09$
+[2026-10-17T21:31:11.931Z] 💹 Ouverture SHORT ETH/USDT:USDT @ 3198.1274 | marge=78.57$ levier=10x expo=785.67$ | var=-0.747% RSI=9.8
+[2026-10-17T21:31:21.942Z] 💹 Ouverture LONG AVAX/USDT:USDT @ 34.7404 | marge=78.57$ levier=10x expo=785.67$ | var=0.616% RSI=80.2
+[2026-10-17T21:32:57.027Z] ✅ Fermeture SL LONG AVAX/USDT:USDT @ 34.3930 | entrée 21:31:21 | durée 1 min 35 s | PnL=-8.48$ (brut -7.86$, frais -0.63$) | capital=973.61$
+[2026-10-17T21:33:42.065Z] 💹 Ouverture SHORT SUI/USDT:USDT @ 1.1932 | marge=77.89$ levier=10x expo=778.89$ | var=-0.995% RSI=5.2
+[2026-10-17T21:34:02.083Z] 💹 Ouverture SHORT BTC/USDT:USDT @ 59130.7446 | marge=77.89$ levier=10x expo=778.89$ | var=-1.116% RSI=21.1
+[2026-10-17T21:34:12.086Z] 💹 Ouverture SHORT SOL/USDT:USDT @ 140.5717 | marge=77.89$ levier=10x expo=778.89$ | var=-2.317% RSI=0.1
+[2026-10-17T21:34:32.109Z] ✅ Fermeture SL SHORT BTC/USDT:USDT @ 59722.0520 | entrée 21:34:02 | durée 30 s | PnL=-8.42$ (brut -7.79$, frais -0.63$) | capital=965.19$
+[2026-10-17T21:35:02.136Z] ✅ Fermeture TP SHORT SOL/USDT:USDT @ 136.6357 | entrée 21:34:12 | durée 50 s | PnL=+21.19$ (brut +21.81$, frais -0.61$) | capital=986.39$
+[2026-10-17T21:35:22.151Z] ✅ Fermeture TP SHORT SUI/USDT:USDT @ 1.1598 | entrée 21:33:42 | durée 1 min 40 s | PnL=+21.19$ (brut +21.81$, frais -0.61$) | capital=1007.58$
+[2026-10-17T21:36:27.207Z] 💹 Ouverture LONG AVAX/USDT:USDT @ 33.5664 | marge=80.61$ levier=10x expo=806.07$ | var=0.644% RSI=72.0
+[2026-10-17T21:36:32.213Z] ✅ Fermeture TP SHORT ETH/USDT:USDT @ 3108.5799 | entrée 21:31:11 | durée 5 min 20 s | PnL=+21.38$ (brut +22.00$, frais -0.62$) | capital=1028.96$
+[2026-10-17T21:36:47.225Z] 💹 Ouverture SHORT ETH/USDT:USDT @ 3089.4906 | marge=82.32$ levier=10x expo=823.17$ | var=-0.751% RSI=7.8
+[2026-10-17T21:37:32.270Z] ✅ Fermeture SL SHORT ETH/USDT:USDT @ 3120.3855 | entrée 21:36:47 | durée 45 s | PnL=-8.89$ (brut -8.23$, frais -0.66$) | capital=1020.07$
+[2026-10-17T21:39:02.350Z] 💹 Ouverture SHORT BTC/USDT:USDT @ 61448.9242 | marge=81.61$ levier=10x expo=816.05$ | var=-2.563% RSI=5.0
+[2026-10-17T21:39:12.355Z] 💹 Ouverture SHORT SOL/USDT:USDT @ 129.5941 | marge=81.61$ levier=10x expo=816.05$ | var=-1.087% RSI=0.1
+[2026-10-17T21:39:37.379Z] 💹 Ouverture SHORT SUI/USDT:USDT @ 1.1300 | marge=81.61$ levier=10x expo=816.05$ | var=-0.604% RSI=11.8
+[2026-10-17T21:40:52.438Z] ✅ Fermeture SL SHORT SUI/USDT:USDT @ 1.1413 | entrée 21:39:37 | durée 1 min 15 s | PnL=-8.82$ (brut -8.16$, frais -0.66$) | capital=1011.25$
+[2026-10-17T21:40:57.444Z] ✅ Fermeture SL SHORT SOL/USDT:USDT @ 130.8900 | entrée 21:39:12 | durée 1 min 45 s | PnL=-8.82$ (brut -8.16$, frais -0.66$) | capital=1002.44$
+[2026-10-17T21:40:57.444Z] ✅ Fermeture SL LONG AVAX/USDT:USDT @ 33.2308 | entrée 21:36:27 | durée 4 min 30 s | PnL=-8.70$ (brut -8.06$, frais -0.64$) | capital=993.73$
+[2026-10-17T21:41:27.474Z] 💹 Ouverture SHORT AVAX/USDT:USDT @ 32.9680 | marge=79.50$ levier=10x expo=794.99$ | var=-0.980% RSI=3.8
+[2026-10-17T21:41:47.490Z] 💹 Ouverture LONG ETH/USDT:USDT @ 3285.0848 | marge=79.50$ levier=10x expo=794.99$ | var=1.846% RSI=99.2
+[2026-10-17T21:43:07.556Z] ✅ Fermeture TP SHORT BTC/USDT:USDT @ 59728.3544 | entrée 21:39:02 | durée 4 min 5 s | PnL=+22.21$ (brut +22.85$, frais -0.64$) | capital=1015.94$
+[2026-10-17T21:44:02.607Z] 💹 Ouverture SHORT BTC/USDT:USDT @ 58782.7676 | marge=81.28$ levier=10x expo=812.75$ | var=-1.391% RSI=0.8
+[2026-10-17T21:44:12.613Z] 💹 Ouverture LONG SOL/USDT:USDT @ 142.0206 | marge=81.28$ levier=10x expo=812.75$ | var=2.277% RSI=100.0
+[2026-10-17T21:44:37.639Z] 💹 Ouverture LONG SUI/USDT:USDT @ 1.2000 | marge=81.28$ levier=10x expo=812.75$ | var=2.992% RSI=99.0
+[2026-10-17T21:44:57.657Z] ✅ Fermeture SL SHORT BTC/USDT:USDT @ 59370.5953 | entrée 21:44:02 | durée 55 s | PnL=-8.78$ (brut -8.13$, frais -0.65$) | capital=1007.16$
+[2026-10-17T21:44:57.657Z] ✅ Fermeture TP LONG ETH/USDT:USDT @ 3377.0672 | entrée 21:41:47 | durée 3 min 10 s | PnL=+21.61$ (brut +22.26$, frais -0.64$) | capital=1028.77$
+[2026-10-17T21:44:57.657Z] ✅ Fermeture TP SHORT AVAX/USDT:USDT @ 32.0449 | entrée 21:41:27 | durée 3 min 30 s | PnL=+21.63$ (brut +22.26$, frais -0.63$) | capital=1050.40$
+[2026-10-17T21:45:47.699Z] ✅ Fermeture SL LONG SOL/USDT:USDT @ 140.6004 | entrée 21:44:12 | durée 1 min 35 s | PnL=-8.77$ (brut -8.13$, frais -0.65$) | capital=1041.63$
+[2026-10-17T21:46:47.747Z] 💹 Ouverture LONG ETH/USDT:USDT @ 3462.6556 | marge=83.33$ levier=10x expo=833.30$ | var=1.369% RSI=87.1
+[2026-10-17T21:47:07.768Z] 💹 Ouverture SHORT AVAX/USDT:USDT @ 30.9395 | marge=83.33$ levier=10x expo=833.30$ | var=-0.644% RSI=17.0
+[2026-10-17T21:47:47.804Z] ✅ Fermeture SL LONG ETH/USDT:USDT @ 3428.0291 | entrée 21:46:47 | durée 1 min | PnL=-9.00$ (brut -8.33$, frais -0.66$) | capital=1032.63$
+[2026-10-17T21:48:12.827Z] ✅ Fermeture SL SHORT AVAX/USDT:USDT @ 31.2489 | entrée 21:47:07 | durée 1 min 5 s | PnL=-9.00$ (brut -8.33$, frais -0.67$) | capital=1023.63$
+[2026-10-17T21:49:02.870Z] 💹 Ouverture LONG BTC/USDT:USDT @ 64729.9776 | marge=81.89$ levier=10x expo=818.90$ | var=2.648% RSI=99.7
+[2026-10-17T21:49:02.871Z] ✅ Fermeture TP LONG SUI/USDT:USDT @ 1.2336 | entrée 21:44:37 | durée 4 min 25 s | PnL=+22.10$ (brut +22.76$, frais -0.66$) | capital=1045.73$
+[2026-10-17T21:49:12.876Z] 💹 Ouverture SHORT SOL/USDT:USDT @ 139.1109 | marge=83.66$ levier=10x expo=836.58$ | var=-0.966% RSI=5.5
+[2026-10-17T21:49:37.906Z] 💹 Ouverture LONG SUI/USDT:USDT @ 1.2525 | marge=83.66$ levier=10x expo=836.58$ | var=1.803% RSI=98.2
+[2026-10-17T21:50:02.925Z] ✅ Fermeture TP LONG BTC/USDT:USDT @ 66542.4169 | entrée 21:49:02 | durée 1 min | PnL=+22.27$ (brut +22.93$, frais -0.66$) | capital=1067.99$
+[2026-10-17T21:51:27.994Z] ✅ Fermeture TP LONG SUI/USDT:USDT @ 1.2875 | entrée 21:49:37 | durée 1 min 50 s | PnL=+22.75$ (brut +23.42$, frais -0.68$) | capital=1090.74$
+[2026-10-17T21:51:48.012Z] 💹 Ouverture LONG ETH/USDT:USDT @ 3559.0401 | marge=87.26$ levier=10x expo=872.59$ | var=1.946% RSI=99.8
+[2026-10-17T21:51:48.013Z] ✅ Fermeture TP SHORT SOL/USDT:USDT @ 135.2158 | entrée 21:49:12 | durée 2 min 35 s | PnL=+22.76$ (brut +23.42$, frais -0.66$) | capital=1113.50$
+[2026-10-17T21:53:08.076Z] 💹 Ouverture SHORT AVAX/USDT:USDT @ 32.6195 | marge=89.08$ levier=10x expo=890.80$ | var=-0.623% RSI=15.7

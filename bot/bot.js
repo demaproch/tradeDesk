@@ -28,7 +28,9 @@ const CONFIG = require('./config');
 const { rsi, priceChangePct } = require('./indicators');
 const TradingEngine = require('./engine');
 const { TF_MS, closedCandles, aggregate } = require('./candles');
-const { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, validatePatch, editableKeys, symbolUniverse, perpSymbol, validateSymbolOnExchange } = require('./params');
+const { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, validatePatch, editableKeys, symbolUniverse, perpSymbol, validateSymbolOnExchange, MAX_LEVERAGE_PAPER, MAX_LEVERAGE_REAL } = require('./params');
+const { AuthManager } = require('./auth');
+const { SecretStore } = require('./secrets');
 
 // Persistance des paramètres modifiés via le dashboard (survivants aux redémarrages)
 const PARAMS_FILE = path.join(__dirname, 'params.overrides.json');
@@ -157,6 +159,116 @@ class MarketData {
   }
 }
 
+// ---------- Courtage réel (ordres envoyés sur l'exchange) ----------
+
+/**
+ * Enveloppe ccxt pour trader réellement. Les clés API ne sont jamais stockées
+ * ici : elles sont fournies par le coffre (SecretStore) au moment de la
+ * création de l'exchange et transmises uniquement à ccxt.
+ *
+ * Ordres utilisés : MARKET + reduceOnly (clôtures). Les TP/SL restent gérés
+ * par le bot (polling sur clôtures) — voir README « Limitations ».
+ */
+class LiveBroker {
+  constructor(cfg, secrets, engine) {
+    this.cfg = cfg;
+    this.secrets = secrets;
+    this.engine = engine;
+    this.exchange = null;
+    this._qtyPrec = new Map(); // symbol -> décimales de quantité (amount_to_precision)
+  }
+
+  get active() { return !!this.exchange; }
+
+  /** Attache les hooks réels au moteur (openPosition/closePosition les appellent). */
+  attachHooks() {
+    this.cfg.onOpen = (p) => this.placeEntry(p);
+    this.cfg.onClose = (p) => this.placeExit(p);
+  }
+
+  detachHooks() {
+    delete this.cfg.onOpen;
+    delete this.cfg.onClose;
+    this.engine.log('INFO', 'Courtage réel désactivé (retour en paper).');
+  }
+
+  /** Crée l'exchange authentifié avec les clés du coffre. Échec => message explicite. */
+  async connect() {
+    try {
+      return await this.secrets.withApiKey(({ apiKey, apiSecret }) => this._create(apiKey, apiSecret));
+    } catch (e) {
+      throw new Error(`Impossible d'utiliser les clés API : ${e.message}`);
+    }
+  }
+
+  async _create(apiKey, apiSecret) {
+    const ExClass = ccxt[this.cfg.exchange];
+    if (!ExClass) throw new Error(`Exchange « ${this.cfg.exchange} » non supporté par ccxt.`);
+    const ex = new ExClass({ apiKey, secret: apiSecret, enableRateLimit: true });
+    if (this.cfg.marketType === 'future' && ex.options) ex.options.defaultType = 'swap';
+    await ex.loadMarkets();
+    // Vérification de l'accès privé (un simple balance ping)
+    await ex.fetchBalance();
+    this.exchange = ex;
+    this._qtyPrec.clear();
+    return ex;
+  }
+
+  /** Arrête proprement (utilisé avant reconnexion / passage en paper). */
+  disconnect() { this.exchange = null; }
+
+  amountToPrecision(symbol, qty) {
+    if (!this._qtyPrec.has(symbol)) {
+      const m = this.exchange.market(symbol);
+      this._qtyPrec.set(symbol, m.precision?.amount ?? 8);
+    }
+    const p = this._qtyPrec.get(symbol);
+    const f = Math.pow(10, -p);
+    return Math.floor(qty / f) * f;
+  }
+
+  /** Entrée : MARKET dans le sens de la position, après réglage du levier. */
+  async placeEntry({ symbol, side, qty, leverage }) {
+    if (!this.exchange) throw new Error('Exchange non connecté.');
+    const ccySide = side === 'LONG' ? 'buy' : 'sell';
+    try {
+      if (typeof this.exchange.setDefaultLeverage === 'function') {
+        await this.exchange.setDefaultLeverage(leverage, symbol);
+      }
+    } catch (e) {
+      this.engine.log('WARN', `Levier ${leverage}x refusé par l'exchange sur ${symbol} (${e.message}) — ordre envoyé quand même.`);
+    }
+    const amount = this.amountToPrecision(symbol, qty);
+    if (!(amount > 0)) throw new Error(`Quantité arrondie à 0 sur ${symbol} (trop petite pour le pas de lot).`);
+    const order = await this.exchange.createOrder(symbol, 'market', ccySide, amount);
+    const fill = order.average || (order.info && (parseFloat(order.info.avgPrice) || parseFloat(order.info.ap))) || 0;
+    this.engine.log('TRADE', `🔴 ORDRE RÉEL exécuté : ${side} ${symbol} qty=${amount} @ ~${fill ? fill.toFixed(4) : 'n/d'} (id=${order.id})`);
+    return { id: order.id, entryPrice: fill > 0 ? fill : undefined };
+  }
+
+  /** Sortie : MARKET opposé + reduceOnly (ne peut jamais retourner la position). */
+  async placeExit({ symbol, side, qty, reason }) {
+    if (!this.exchange) throw new Error('Exchange non connecté.');
+    const ccySide = side === 'LONG' ? 'sell' : 'buy';
+    const amount = this.amountToPrecision(symbol, qty);
+    if (!(amount > 0)) throw new Error(`Quantité arrondie à 0 sur ${symbol}.`);
+    const params = {};
+    if (this.cfg.marketType === 'future' && typeof this.exchange.createOrder === 'function') {
+      params.reduceOnly = true;
+    }
+    const order = await this.exchange.createOrder(symbol, 'market', ccySide, amount, undefined, params);
+    this.engine.log('TRADE', `🔴 ORDRE RÉEL de clôture (${reason}) : ${ccySide} ${symbol} qty=${amount} (id=${order.id})`);
+    return { id: order.id };
+  }
+
+  /** Petit ping authentifié utilisé par le bouton « Tester la connexion » du dashboard. */
+  async testConnection() {
+    const bal = await this.exchange.fetchBalance();
+    const total = Object.values(bal.total || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+    return { ok: true, assets: Object.keys(bal.total || {}).length, usdApprox: Number(total.toFixed(2)) };
+  }
+}
+
 // ---------- Stratégie ----------
 
 class MomentumBot {
@@ -244,8 +356,9 @@ class MomentumBot {
   /**
    * Version asynchrone : valide le patch puis vérifie chaque nouvelle paire sur l'exchange
    * avant application (refus explicite si un marché est inconnu).
+   * Le changement de mode paper<->réel passe par ici (broker fourni).
    */
-  async applyParamsAsync(patch) {
+  async applyParamsAsync(patch, broker = null) {
     const res = validatePatch(patch, this.cfg);
     if (!res.ok) return res;
     if (Array.isArray(res.changes.symbols)) {
@@ -256,13 +369,40 @@ class MomentumBot {
         if (err) return { ok: false, error: `Paire refusée : ${err}` };
       }
     }
-    return this.applyParams(res.changes);
+    // ----- Passage en mode RÉEL : exige coffre débloqué + connexion exchange OK -----
+    if (res.changes.tradingMode === 'real') {
+      if (!broker || !broker.secrets.unlocked) {
+        return { ok: false, error: 'Mode réel refusé : clés API absentes ou coffre verrouillé. Renseigne-les dans « Clés API & sécurité ».' };
+      }
+      try {
+        await broker.connect();
+      } catch (e) {
+        return { ok: false, error: `Connexion à l'exchange impossible : ${e.message}` };
+      }
+      broker.attachHooks();
+      this.cfg.maxLeverage = MAX_LEVERAGE_REAL; // levier bridé côté moteur aussi
+      this.engine.log('INFO', '🔴 MODE RÉEL ACTIVÉ — les ordres seront envoyés sur l\'exchange.');
+    } else if ('tradingMode' in res.changes && res.changes.tradingMode === 'paper') {
+      if (broker) { broker.detachHooks(); broker.disconnect(); }
+      this.cfg.maxLeverage = MAX_LEVERAGE_PAPER;
+      if (this.cfg.leverage > MAX_LEVERAGE_PAPER) this.cfg.leverage = DEFAULTS.leverage ?? 10;
+      this.engine.log('INFO', '🧪 Mode PAPER réactivé (simulation).');
+    }
+    const applied = this.applyParams(res.changes);
+    // Capital simulé modifié : reset du carnet uniquement en mode paper
+    if (applied.ok && 'initialCapital' in res.changes && this.cfg.tradingMode !== 'real') {
+      this.engine.resetBook(this.cfg.initialCapital);
+      this.lastCandleTime.clear();
+      this.engine.log('INFO', `📓 Carnet paper réinitialisé : capital=${this.cfg.initialCapital}$ (historique effacé).`);
+    }
+    return applied;
   }
 
-  resetParams() {
+  async resetParams(broker = null) {
     const patch = {};
     for (const k of editableKeys()) if (DEFAULTS[k] !== this.cfg[k]) patch[k] = DEFAULTS[k];
     if (!Object.keys(patch).length) return { ok: true, applied: {} };
+    if ('tradingMode' in patch) return this.applyParamsAsync(patch, broker);
     return this.applyParams(patch);
   }
 
@@ -286,17 +426,17 @@ class MomentumBot {
   }
 
   /** Fermeture manuelle (dashboard) : ferme au prix courant et enregistre le point d'équité. */
-  closeManually(symbol) {
+  async closeManually(symbol) {
     const pos = this.engine.positions.get(symbol);
     if (!pos) return null;
     const price = this.prices[symbol] ?? pos.entryPrice;
-    const trade = this.engine.closePosition(symbol, price, 'MANUAL');
+    const trade = await this.engine.closePosition(symbol, price, 'MANUAL');
     this.engine.recordEquity(this.prices);
     return trade;
   }
 
-  closeAllManually() {
-    for (const sym of [...this.engine.positions.keys()]) this.closeManually(sym);
+  async closeAllManually() {
+    for (const sym of [...this.engine.positions.keys()]) await this.closeManually(sym);
   }
 
   async processSymbol(symbol) {
@@ -321,7 +461,7 @@ class MomentumBot {
       if (exit) {
         // exécuté AU PRIX EXACT du TP/SL (comme un ordre conditionnel réel),
         // pas à la clôture qui peut avoir slippé plus loin
-        this.engine.closePosition(symbol, exit.price, exit.kind);
+        await this.engine.closePosition(symbol, exit.price, exit.kind);
       }
     }
 
@@ -345,9 +485,9 @@ class MomentumBot {
     const shortSignal = changePct < -this.cfg.minMovePct && r < this.cfg.rsiShortMax;
 
     if (longSignal) {
-      this.engine.openPosition(symbol, 'LONG', closePrice, { changePct, rsi: r });
+      await this.engine.openPosition(symbol, 'LONG', closePrice, { changePct, rsi: r });
     } else if (shortSignal) {
-      this.engine.openPosition(symbol, 'SHORT', closePrice, { changePct, rsi: r });
+      await this.engine.openPosition(symbol, 'SHORT', closePrice, { changePct, rsi: r });
     }
   }
 }
@@ -356,18 +496,56 @@ class MomentumBot {
 
 async function main() {
   loadOverrides();
+
+  // ---------- Sécurité : authentification du dashboard + coffre à clés API ----------
+  const auth = new AuthManager(path.join(__dirname, 'auth.json'), process.env.MOMBOT_PASSWORD || null);
+  if (auth.generated) {
+    console.log('🔑 Aucun mot de passe configuré : un mot de passe a été GÉNÉRÉ pour ce premier lancement :');
+    console.log(`   ${auth.firstPassword}`);
+    console.log('   (stocké haché dans auth.json — utilise-le pour te connecter ; ou définis MOMBOT_PASSWORD)');
+  }
+  const secrets = new SecretStore(path.join(__dirname, 'secrets.json'));
+  const envKey = process.env.MOMBOT_API_KEY, envSecret = process.env.MOMBOT_API_SECRET;
+  const envMaster = process.env.MOMBOT_MASTER;
+  if (envKey && envSecret && !secrets.configured) {
+    try { secrets.set(envKey, envSecret, envMaster || envKey.slice(-12)); console.log('🗝️ Clés API fournies par variables d\'environnement → enregistrées chiffrées.'); }
+    catch (e) { console.warn('⚠️ Coffre API inaccessible en écriture :', e.message); }
+  } else if (envKey && envSecret && secrets.configured && envMaster && !secrets.unlocked) {
+    secrets.unlock(envMaster);
+  }
+  if (secrets.configured && envMaster) secrets.unlock(envMaster);
+
   const engine = new TradingEngine(CONFIG);
   const market = new MarketData(CONFIG);
   await market.init();
 
   const bot = new MomentumBot(CONFIG, engine, market);
+  const broker = new LiveBroker(CONFIG, secrets, engine);
+
+  // Si le mode réel était déjà actif avant redémarrage : tentative de reconnexion
+  if (CONFIG.tradingMode === 'real' && !DEMO) {
+    if (secrets.unlocked) {
+      try { await broker.connect(); broker.attachHooks(); CONFIG.maxLeverage = MAX_LEVERAGE_REAL; engine.log('INFO', '🔴 Reconnexion au mode RÉEL (clés API restaurées).'); }
+      catch (e) { CONFIG.tradingMode = 'paper'; CONFIG.maxLeverage = MAX_LEVERAGE_PAPER; engine.log('WARN', `Mode réel impossible au démarrage (${e.message}) → repli en paper.`); }
+    } else {
+      CONFIG.tradingMode = 'paper'; CONFIG.maxLeverage = MAX_LEVERAGE_PAPER;
+      engine.log('WARN', 'Mode réel demandé mais coffre verrouillé/absent → démarrage en paper. Débloque les clés dans le dashboard.');
+    }
+  }
 
   const app = express();
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
 
   app.use(express.json());
+  app.use(auth.requireAuth(path.join(__dirname, 'public')));
+  app.use(auth.requireCsrf()); // () : renvoie une closure liée à `auth` (sinon this perdu → 500 sur POST)
   app.use(express.static(path.join(__dirname, 'public')));
+
+  // ---------- Routes d'authentification ----------
+  app.post('/api/login', (req, res) => auth.handleLogin(req, res));
+  app.get('/api/me', (_req, res) => auth.handleMe(_req, res));
+  app.post('/api/logout', (req, res) => { auth.destroySession(req, res); res.json({ ok: true }); });
 
   // Payload d'état complet envoyé au dashboard (HTTP + WS)
   const statePayload = () => ({
@@ -376,6 +554,12 @@ async function main() {
     running: bot.running,
     paused: bot.paused,
     demo: DEMO,
+    security: {
+      tradingMode: CONFIG.tradingMode,
+      realActive: broker.active,
+      keys: secrets.status(),
+      maxLeverageReal: MAX_LEVERAGE_REAL,
+    },
   });
 
   // API : état complet du bot
@@ -395,18 +579,19 @@ async function main() {
       symbolUniverse: symbolUniverse(CONFIG.symbols),
       initialCapital: CONFIG.initialCapital,
       maxLeverage: CONFIG.maxLeverage,
+      security: statePayload().security,
     });
   });
 
   // API : modifier les paramètres via le dashboard (patch validé ; paires vérifiées sur l'exchange)
   app.post('/api/params', async (req, res) => {
-    const result = await bot.applyParamsAsync(req.body || {});
+    const result = await bot.applyParamsAsync(req.body || {}, broker);
     res.status(result.ok ? 200 : 400).json({ ...result, state: statePayload() });
   });
 
   // API : réinitialiser les paramètres aux valeurs par défaut
-  app.post('/api/params/reset', (_req, res) => {
-    const result = bot.resetParams();
+  app.post('/api/params/reset', async (_req, res) => {
+    const result = await bot.resetParams(broker);
     res.json({ ...result, state: statePayload() });
   });
 
@@ -427,18 +612,78 @@ async function main() {
   });
 
   // API : fermer toutes les positions manuellement au prix courant
-  app.post('/api/closeall', (_req, res) => {
-    bot.closeAllManually();
+  app.post('/api/closeall', async (_req, res) => {
+    await bot.closeAllManually();
     res.json(statePayload());
   });
 
   // API : fermer une position précise au prix courant
-  app.post('/api/close/:symbol', (req, res) => {
+  app.post('/api/close/:symbol', async (req, res) => {
     const sym = decodeURIComponent(req.params.symbol);
     if (!engine.positions.has(sym)) return res.status(404).json({ error: `Aucune position ouverte sur ${sym}.` });
-    const trade = bot.closeManually(sym);
+    const trade = await bot.closeManually(sym);
     bot.onChange();
     res.json({ ok: true, trade, state: statePayload() });
+  });
+
+  // ---------- Coffre à clés API (les secrets ne transitent JAMAIS en clair vers le client) ----------
+  app.get('/api/keys/status', (_req, res) => res.json(secrets.status()));
+
+  app.post('/api/keys/set', async (req, res) => {
+    const { apiKey, apiSecret, master } = req.body || {};
+    if (typeof apiKey !== 'string' || typeof apiSecret !== 'string' || typeof master !== 'string') {
+      return res.status(400).json({ error: 'Champs requis : apiKey, apiSecret et master (mot de passe maître qui chiffrera le coffre).' });
+    }
+    if (apiKey.trim().length < 8 || apiSecret.trim().length < 8) {
+      return res.status(400).json({ error: 'Clés trop courtes — vérifie que tu as copié la clé API et le secret complets.' });
+    }
+    if (master.length < 8) {
+      return res.status(400).json({ error: 'Mot de passe maître trop court (8 caractères minimum).' });
+    }
+    try {
+      // on vérifie d'abord que les clés fonctionnent AVANT de les enregistrer
+      const probe = new (ccxt[CONFIG.exchange])({ apiKey: apiKey.trim(), secret: apiSecret.trim(), enableRateLimit: true });
+      if (CONFIG.marketType === 'future' && probe.options) probe.options.defaultType = 'swap';
+      await probe.loadMarkets();
+      await probe.fetchBalance();
+      secrets.set(apiKey.trim(), apiSecret.trim(), master);
+      engine.log('INFO', `🗝️ Clés API enregistrées (chiffrées AES-256-GCM, id=${secrets.keyId}).`);
+      res.json({ ok: true, status: secrets.status(), state: statePayload() });
+    } catch (e) {
+      res.status(400).json({ error: `Clés refusées par l'exchange ou réseau indisponible : ${String(e.message).slice(0, 200)}` });
+    }
+  });
+
+  app.post('/api/keys/unlock', (req, res) => {
+    const { master } = req.body || {};
+    if (typeof master !== 'string') return res.status(400).json({ error: 'Mot de passe maître requis.' });
+    if (!secrets.unlock(master)) return res.status(401).json({ error: 'Mot de passe maître incorrect.' });
+    engine.log('INFO', '🔓 Coffre déverrouillé pour cette session.');
+    res.json({ ok: true, status: secrets.status(), state: statePayload() });
+  });
+
+  app.post('/api/keys/lock', (_req, res) => {
+    secrets.lock();
+    if (CONFIG.tradingMode === 'real') {
+      broker.detachHooks(); broker.disconnect();
+      CONFIG.tradingMode = 'paper'; CONFIG.maxLeverage = MAX_LEVERAGE_PAPER;
+      saveOverrides();
+      engine.log('WARN', 'Coffre verrouillé pendant le mode réel → retour automatique en paper.');
+    }
+    res.json({ ok: true, status: secrets.status(), state: statePayload() });
+  });
+
+  app.post('/api/keys/test', async (_req, res) => {
+    if (!broker.active) return res.status(400).json({ error: 'Aucune connexion réelle active (mode paper ou coffre verrouillé).' });
+    try { res.json(await broker.testConnection()); }
+    catch (e) { res.status(500).json({ error: `Test échoué : ${String(e.message).slice(0, 200)}` }); }
+  });
+
+  app.post('/api/keys/erase', (_req, res) => {
+    if (CONFIG.tradingMode === 'real') { broker.detachHooks(); broker.disconnect(); CONFIG.tradingMode = 'paper'; CONFIG.maxLeverage = MAX_LEVERAGE_PAPER; saveOverrides(); }
+    secrets.erase();
+    engine.log('WARN', '🗑️ Clés API effacées du coffre.');
+    res.json({ ok: true, status: secrets.status(), state: statePayload() });
   });
 
   // Push temps réel via WebSocket
@@ -448,10 +693,13 @@ async function main() {
       if (client.readyState === 1) client.send(payload);
     }
   };
-  wss.on('connection', (ws) => ws.send(JSON.stringify(statePayload())));
+  wss.on('connection', (ws, req) => {
+    if (!auth.wsAuthenticate(req)) { ws.close(4401, 'Non authentifié'); return; }
+    ws.send(JSON.stringify(statePayload()));
+  });
 
   server.listen(CONFIG.port, () => {
-    console.log(`📊 Dashboard : http://localhost:${CONFIG.port}`);
+    console.log(`📊 Dashboard : http://localhost:${CONFIG.port} (protégé par mot de passe)`);
     bot.start();
   });
 }

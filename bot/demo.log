@@ -1,0 +1,7 @@
+💾 Overrides de paramètres chargés (12 clé(s)).
+🧪 Mode DÉMO : marché simulé (pas besoin d'internet).
+📊 Dashboard : http://localhost:3000 (protégé par mot de passe)
+[2026-10-17T21:53:23.687Z] ℹ️ Bot démarré | timeframe=5m | cycle=5s | capital=1000.00$ | frais=0.04%/jambe
+[2026-10-17T21:53:38.693Z] 💹 Ouverture SHORT SUI/USDT:USDT @ 1.2019 | marge=80.00$ levier=10x expo=800.00$ | var=-0.676% RSI=25.2
+[2026-10-17T21:53:43.698Z] 💹 Ouverture SHORT ETH/USDT:USDT @ 3151.4650 | marge=80.00$ levier=10x expo=800.00$ | var=-0.691% RSI=17.7
+[2026-10-17T21:53:58.711Z] 💹 Ouverture SHORT BTC/USDT:USDT @ 63452.7657 | marge=80.00$ levier=10x expo=800.00$ | var=-0.660% RSI=10.7

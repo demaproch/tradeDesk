@@ -14,7 +14,12 @@ const PARAM_GROUPS = [
   { id: 'money',      title: 'Money management', icon: '💰' },
   { id: 'exits',      title: 'Sorties TP / SL', icon: '🎯' },
   { id: 'execution',  title: 'Exécution & cadence', icon: '⚙️' },
+  { id: 'mode',       title: 'Mode de trading (paper / réel)', icon: '🔐' },
 ];
+
+/** Le levier maximum autorisé dépend du mode : 12x en paper, bridé à 5x en réel. */
+const MAX_LEVERAGE_PAPER = 12;
+const MAX_LEVERAGE_REAL = 5;
 
 /**
  * Schéma des paramètres éditables : key -> validateur + métadonnées UI.
@@ -36,6 +41,8 @@ const PARAM_SCHEMA = {
   cycleMs:          { type: 'int',   min: 5_000,        max: 600_000,    label: 'Intervalle du cycle', unit: 'ms', step: 1000, group: 'execution', order: 'advanced', help: 'Fréquence d\'analyse des paires.' },
   cooldownMs:       { type: 'int',   min: 0,            max: 24 * 3600_000, label: 'Cooldown', unit: 'ms', step: 30_000, group: 'execution', order: 'advanced', help: 'Délai minimum entre deux trades sur un même symbole.' },
   feePct:           { type: 'float', min: 0,            max: 1,           label: 'Frais par jambe', unit: '%', step: 0.01, group: 'execution', order: 'core', help: 'Frais taker estimés appliqués à l\'entrée ET à la sortie de chaque trade (0 = ignore les frais).' },
+  tradingMode:      { type: 'enum', values: ['paper', 'real'], label: 'Mode de trading', group: 'mode', order: 'core', help: '"Paper" = simulation sur prix réels. "Réel" = ordres envoyés sur l\'exchange avec les clés API du coffre (levier bridé à 5x, risque plafonné à 25 %).' },
+  initialCapital:   { type: 'float', min: 10,           max: 1_000_000,   label: 'Capital simulé', unit: '$', step: 10, group: 'money', order: 'advanced', help: 'Capital de départ de la simulation (reset du carnet paper). Sans effet en mode réel.' },
 };
 
 /** Paires proposées au dashboard : univers connu + paires actuellement actives */
@@ -101,6 +108,14 @@ function checkCoherence(cfg) {
   }
   if (cfg.timeframe === '1m' && cfg.cycleMs < 20_000) {
     return 'En timeframe 1m, le cycle ne peut pas être inférieur à 20 000 ms (les bougies se forment chaque minute).';
+  }
+  // Mode réel : garde-fous renforcés (levier et risque plafonnés)
+  const maxLev = cfg.tradingMode === 'real' ? MAX_LEVERAGE_REAL : MAX_LEVERAGE_PAPER;
+  if (cfg.leverage > maxLev) {
+    return `Levier ${cfg.leverage}x refusé en mode ${cfg.tradingMode === 'real' ? 'RÉEL' : 'paper'} : maximum autorisé ${maxLev}x.`;
+  }
+  if (cfg.tradingMode === 'real' && cfg.riskPct > 25) {
+    return 'Mode RÉEL : risque par trade plafonné à 25 % du capital (garde-fou anti-ruine).';
   }
   return null;
 }
@@ -173,4 +188,4 @@ function editableKeys() {
   return Object.keys(PARAM_SCHEMA);
 }
 
-module.exports = { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, KNOWN_SYMBOLS, validatePatch, checkCoherence, editableKeys, normalizeSymbols, symbolUniverse, perpSymbol, validateSymbolOnExchange };
+module.exports = { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, KNOWN_SYMBOLS, MAX_LEVERAGE_PAPER, MAX_LEVERAGE_REAL, validatePatch, checkCoherence, editableKeys, normalizeSymbols, symbolUniverse, perpSymbol, validateSymbolOnExchange };
