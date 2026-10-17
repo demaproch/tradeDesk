@@ -297,8 +297,8 @@
       <section class="card">
         <div class="card-head"><h2>🟢 Positions ouvertes</h2></div>
         <div class="card-body scroll-y" style="padding-top:4px">
-          <table><thead><tr><th>Symbole</th><th>Side</th><th>Entrée</th><th>Prix</th><th>Marge</th><th>Levier</th><th>Move %</th><th>PnL latent</th><th>SL → TP</th><th></th></tr></thead>
-          <tbody id="posBody"><tr><td colspan="10" class="empty">Aucune position ouverte</td></tr></tbody></table>
+          <table><thead><tr><th>Symbole</th><th>Side</th><th>Entrée (heure)</th><th>Durée</th><th>Prix entrée</th><th>Prix actuel</th><th>Marge</th><th>Levier</th><th>Move %</th><th>PnL latent</th><th>SL → TP</th><th></th></tr></thead>
+          <tbody id="posBody"><tr><td colspan="12" class="empty">Aucune position ouverte</td></tr></tbody></table>
         </div>
       </section>
 
@@ -509,10 +509,13 @@ function tpslBar(p) {
 
 function renderPositions() {
   const tb = document.getElementById('posBody');
-  if (!STATE.positions.length) { tb.innerHTML = '<tr><td colspan="10" class="empty">Aucune position ouverte</td></tr>'; return; }
+  if (!STATE.positions.length) { tb.innerHTML = '<tr><td colspan="12" class="empty">Aucune position ouverte</td></tr>'; return; }
+  const nowMs = Date.now();
   tb.innerHTML = STATE.positions.map(p => `<tr>
     <td class="mono">${shortSym(p.symbol)}</td>
     <td><span class="side-tag side-${p.side}">${p.side}</span></td>
+    <td class="mono" style="color:var(--muted)">${p.openedAt ? new Date(p.openedAt).toLocaleTimeString('fr-FR') : '—'}</td>
+    <td class="mono live-dur" data-opened="${p.openedAt || ''}" style="color:var(--muted)">${p.openedAt ? fmtDuration(nowMs - p.openedAt) : '—'}</td>
     <td class="mono">${p.entryPrice.toFixed(4)}</td>
     <td class="mono">${(p.currentPrice ?? p.entryPrice).toFixed(4)}</td>
     <td class="mono">${usd(p.margin)}</td>
@@ -534,13 +537,24 @@ function fmtDuration(ms) {
   return h + ' h' + (rm ? ' ' + String(rm).padStart(2, '0') + ' min' : '');
 }
 
+// Tick "durée en direct" des positions ouvertes (re-render léger chaque seconde)
+setInterval(() => {
+  const cells = document.querySelectorAll('.live-dur');
+  if (!cells.length) return;
+  const nowMs = Date.now();
+  cells.forEach((c) => {
+    const o = Number(c.dataset.opened);
+    if (o) c.textContent = fmtDuration(nowMs - o);
+  });
+}, 1000);
+
 function renderTrades() {
   const tb = document.getElementById('tradesBody');
   if (!STATE.trades.length) { tb.innerHTML = '<tr><td colspan="9" class="empty">Aucun trade fermé</td></tr>'; return; }
   tb.innerHTML = STATE.trades.map(t => `<tr>
-    <td class="mono" style="color:var(--muted)">${new Date(t.closedAt).toLocaleTimeString('fr-FR')}</td>
-    <td class="mono" style="color:var(--muted)">${t.openedAt ? new Date(t.openedAt).toLocaleTimeString('fr-FR') : '—'}</td>
-    <td class="mono" style="color:var(--muted)">${fmtDuration(t.closedAt - t.openedAt)}</td>
+    <td class="mono" style="color:var(--muted)" title="${new Date(t.closedAt).toLocaleString('fr-FR')}">${new Date(t.closedAt).toLocaleTimeString('fr-FR')}</td>
+    <td class="mono" style="color:var(--muted)" title="${t.openedAt ? new Date(t.openedAt).toLocaleString('fr-FR') : ''}">${t.openedAt ? new Date(t.openedAt).toLocaleTimeString('fr-FR') : '—'}</td>
+    <td class="mono" style="color:var(--muted)">${fmtDuration(t.durationMs ?? (t.closedAt - t.openedAt))}</td>
     <td class="mono">${shortSym(t.symbol)}</td>
     <td><span class="side-tag side-${t.side}">${t.side}</span></td>
     <td class="mono">${t.entryPrice.toFixed(4)}</td>

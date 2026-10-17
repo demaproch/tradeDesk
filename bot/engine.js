@@ -147,6 +147,7 @@ class TradingEngine {
 
     // Frais taker estimés sur les deux jambes (entrée + sortie), assis sur le
     // volume réellement échangé (au moins le notionnel ouvert).
+    const now = Date.now();
     const feePct = this.cfg.feePct ?? 0.04; // % par jambe
     const fees = (pos.notional + pos.qty * price) * (feePct / 100);
     const grossPnl = this.realizedPnl(pos, price);
@@ -166,9 +167,9 @@ class TradingEngine {
       grossPnl,
       fees,
       reason,                          // 'TP' | 'SL' | 'MANUAL'
-      openedAt: pos.openedAt,
-      closedAt: Date.now(),
-      durationMs: Date.now() - pos.openedAt,
+      openedAt: pos.openedAt,          // horodatage d'entrée (ms)
+      closedAt: now,                   // horodatage de sortie (ms)
+      durationMs: now - pos.openedAt,  // durée du trade (ms)
     };
     this.closedTrades.push(trade);
     if (this.closedTrades.length > 500) this.closedTrades.shift();
