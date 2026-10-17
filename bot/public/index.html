@@ -148,8 +148,14 @@
     border-top: 6px solid var(--muted); transition: transform .22s ease;
   }
   .card.collapsed .chev { transform: rotate(-90deg); }
-  .card.collapsed .card-body.settings-body { display: none; }
+  .card.collapsed .card-body.settings-body,
+  .card.collapsed .card-body.keys-body { display: none; }
   .card.collapsed .card-head { border-bottom: none; }
+  .keys-summary {
+    display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
+    border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);
+  }
+  .card.collapsed .keys-summary { display: flex; }
   .params-summary {
     display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
     border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);
@@ -415,8 +421,12 @@
 
       <!-- Clés API & sécurité -->
       <section class="card" id="keysCard">
-        <div class="card-head"><h2>🔐 Clés API &amp; sécurité</h2><span id="keyStatusChip" style="font-size:10.5px;color:var(--muted)">—</span></div>
-        <div class="card-body settings-body" style="display:grid;gap:12px">
+        <div class="card-head clickable" onclick="toggleKeys(event)" title="Cliquer pour replier / déplier">
+          <h2>🔐 Clés API &amp; sécurité <span class="chev"></span></h2>
+          <span id="keyStatusChip" style="font-size:10.5px;color:var(--muted)">—</span>
+        </div>
+        <div class="keys-summary" id="keysSummary"></div>
+        <div class="card-body settings-body keys-body" style="display:grid;gap:12px">
           <div style="font-size:12px;color:var(--muted);line-height:1.5">
             Mode actuel : <b id="modeNow" style="color:var(--text)">paper</b> · levier réel bridé à <b id="maxLevReal">5x</b>.
             Les clés sont chiffrées (AES-256-GCM) dans <code>secrets.json</code> et ne quittent jamais le serveur. Privilégie une clé API sans droit de retrait.
@@ -849,6 +859,34 @@ function toggleParams(e) {
   try { localStorage.setItem(PARAMS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
 }
 
+// ==================== Panneau Clés API & sécurité repliable ====================
+const KEYS_COLLAPSE_KEY = 'keysCardCollapsed';
+
+function toggleKeys(e) {
+  if (e && e.target.closest('button, a, input, select')) return;
+  const card = document.getElementById('keysCard');
+  const collapsed = !card.classList.contains('collapsed');
+  card.classList.toggle('collapsed', collapsed);
+  try { localStorage.setItem(KEYS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
+  updateKeysSummary();
+}
+
+// Résumé affiché quand le panneau est replié : mode + état du coffre en un coup d'œil
+function updateKeysSummary() {
+  const el = document.getElementById('keysSummary');
+  if (!el || !STATE || !STATE.security) return;
+  const sec = STATE.security, keys = sec.keys || {};
+  const chips = [];
+  chips.push(sec.tradingMode === 'real'
+    ? '<span class="chip" style="color:#fda4af;border-color:rgba(251,113,133,.4)">🔴 RÉEL</span>'
+    : '<span class="chip">🧪 Paper</span>');
+  chips.push(`<span class="chip">Levier réel <b>${sec.maxLeverageReal ?? 5}x</b></span>`);
+  if (!keys.configured) chips.push('<span class="chip">Aucune clé</span>');
+  else if (keys.unlocked) chips.push(`<span class="chip">🔓 Coffre déverrouillé · <b>${keys.keyId}</b></span>`);
+  else chips.push(`<span class="chip">🔒 Coffre verrouillé · <b>${keys.keyId}</b></span>`);
+  el.innerHTML = chips.join('');
+}
+
 // Résumé affiché quand le panneau est replié ; badge « non appliquées » si ébauche en cours
 function updateParamsSummary() {
   const el = document.getElementById('paramsSummary');
@@ -1156,6 +1194,7 @@ function renderSecurity() {
   document.getElementById('keyIdTxt').textContent = keys.keyId || '';
   document.getElementById('btnTestKeys').style.display = sec.realActive ? '' : 'none';
   document.getElementById('btnPaper').style.display = sec.tradingMode === 'real' ? '' : 'none';
+  updateKeysSummary();
 }
 
 async function saveKeys() {
@@ -1243,10 +1282,13 @@ function closePosition(encSym) {
   connect();
 })();
 
-// Restaurer l'état replié/déplié du panneau paramètres (mémoire navigateur)
+// Restaurer l'état replié/déplié des panneaux (mémoire navigateur)
 try {
   if (localStorage.getItem(PARAMS_COLLAPSE_KEY) === '1') {
     document.getElementById('paramsCard').classList.add('collapsed');
+  }
+  if (localStorage.getItem(KEYS_COLLAPSE_KEY) === '1') {
+    document.getElementById('keysCard').classList.add('collapsed');
   }
 } catch (_) {}
 </script>
