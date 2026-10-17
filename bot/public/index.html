@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Momentum Bot — Dashboard</title>
+<title>momBot — Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='12' y1='56' x2='54' y2='10' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%23818cf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='%230a1120'/%3E%3Crect x='1.5' y='1.5' width='61' height='61' rx='13.5' fill='none' stroke='url(%23g)' stroke-opacity='.4' stroke-width='2'/%3E%3Cline x1='17' y1='46' x2='17' y2='58' stroke='%23f87171' stroke-width='3' stroke-linecap='round' opacity='.55'/%3E%3Crect x='12.5' y='35' width='9' height='14' rx='2.5' fill='%23ef4444' opacity='.85'/%3E%3Cline x1='35' y1='18' x2='35' y2='38' stroke='%2334d399' stroke-width='3' stroke-linecap='round' opacity='.55'/%3E%3Crect x='30.5' y='23' width='9' height='13' rx='2.5' fill='%2310b981' opacity='.9'/%3E%3Cpath d='M8 46 L22 33 L32 40 L54 16' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M46 9 h13 v13' fill='none' stroke='%2334d399' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='54' cy='16' r='4.5' fill='%2334d399'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 <style>
@@ -51,16 +52,33 @@
     max-width: 1520px; margin: 0 auto; padding: 13px 24px;
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   }
-  .logo { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+  .logo { display: flex; align-items: center; gap: 14px; margin-right: auto; }
+  /* ---------- Logo momBot : monogramme "m" + tendance ascendante ---------- */
   .logo-mark {
-    width: 42px; height: 42px; border-radius: 13px; flex: none;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    display: grid; place-items: center; font-size: 21px;
-    box-shadow: 0 4px 20px rgba(56, 189, 248, 0.38);
+    position: relative; width: 46px; height: 46px; border-radius: 15px; flex: none;
+    background: linear-gradient(140deg, #38bdf8 0%, #6366f1 55%, #818cf8 100%);
+    display: grid; place-items: center;
+    box-shadow: 0 8px 26px rgba(56, 189, 248, 0.35), inset 0 1.5px 0 rgba(255, 255, 255, 0.35), inset 0 -2px 6px rgba(30, 27, 75, 0.4);
+    overflow: visible;
+    transition: transform .25s cubic-bezier(.34, 1.56, .64, 1), box-shadow .25s ease;
   }
-  .logo h1 { font-size: 17px; font-weight: 900; letter-spacing: -0.03em; }
-  .logo h1 span { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .logo p { font-size: 11px; color: var(--muted); margin-top: 2px; letter-spacing: 0.01em; }
+  .logo:hover .logo-mark { transform: translateY(-2px) rotate(-3deg); box-shadow: 0 12px 32px rgba(99, 102, 241, 0.5), inset 0 1.5px 0 rgba(255, 255, 255, 0.35); }
+  .logo-mark::after { /* halo doux */
+    content: ""; position: absolute; inset: -8px; border-radius: 20px; z-index: -1;
+    background: radial-gradient(closest-side, rgba(99, 102, 241, 0.35), transparent 72%);
+    opacity: 0; transition: opacity .3s ease;
+  }
+  .logo:hover .logo-mark::after { opacity: 1; }
+  .logo-mark svg { width: 34px; height: 34px; display: block; filter: drop-shadow(0 1.5px 2px rgba(15, 23, 42, 0.45)); }
+  .logo-mark .trend { stroke-dasharray: 40; stroke-dashoffset: 40; animation: drawTrend 1.1s cubic-bezier(.6,.05,.3,1) .2s forwards; }
+  @keyframes drawTrend { to { stroke-dashoffset: 0; } }
+  .logo-mark .arrowhead { opacity: 0; animation: fadeIn .35s ease 1.1s forwards; }
+  @keyframes fadeIn { to { opacity: 1; } }
+  .logo h1 { font-size: 21px; font-weight: 900; letter-spacing: -0.04em; line-height: 1.1; }
+  .logo h1 b { color: #fff; }
+  .logo h1 span { background: linear-gradient(92deg, #7dd3fc 0%, var(--accent) 45%, var(--accent-2) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .logo h1 em { font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--bg); background: linear-gradient(92deg, var(--accent), var(--accent-2)); padding: 2.5px 7px; border-radius: 999px; vertical-align: 6px; margin-left: 7px; box-shadow: 0 2px 10px rgba(56,189,248,.35); }
+  .logo p { font-size: 11px; color: var(--muted); margin-top: 3px; letter-spacing: 0.01em; }
   .status-pill {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 7px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
@@ -121,6 +139,29 @@
   .card-head h2 { font-size: 13.5px; font-weight: 800; letter-spacing: 0.01em; display:flex; align-items:center; gap:8px; }
   .card-body { padding: 16px 18px; }
 
+  /* ---------- Panneau repliable (collapsible) ---------- */
+  .card-head.clickable { cursor: pointer; user-select: none; }
+  .card-head.clickable:hover { background: var(--bg-soft); }
+  .chev {
+    display: inline-block; width: 0; height: 0; margin-left: 2px;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid var(--muted); transition: transform .22s ease;
+  }
+  .card.collapsed .chev { transform: rotate(-90deg); }
+  .card.collapsed .card-body.settings-body { display: none; }
+  .card.collapsed .card-head { border-bottom: none; }
+  .params-summary {
+    display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
+    border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted);
+  }
+  .card.collapsed .params-summary { display: flex; }
+  .params-summary .chip {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 7px; padding: 3px 8px; font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; color: var(--text);
+  }
+  .params-summary .chip b { color: var(--accent, #4cc9f0); font-weight: 700; }
+
   /* ---------- Timeframe segmented control ---------- */
   .tf-group { display: flex; gap: 0; flex-wrap: wrap; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 11px; padding: 3px; }
   .tf-btn {
@@ -158,6 +199,21 @@
 
   /* ---------- Signals ---------- */
   .sig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 12px; }
+  .sym-checks { display: flex; flex-wrap: wrap; gap: 7px; }
+  .sym-checks.dirty { outline: 1px solid var(--warn, #e0a458); outline-offset: 4px; border-radius: 8px; }
+  .sym-check {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px;
+    font: 600 11.5px 'JetBrains Mono', monospace; color: var(--muted);
+    background: var(--bg-soft); transition: all .15s;
+  }
+  .sym-check:hover { border-color: var(--accent); color: var(--fg); }
+  .sym-check input { accent-color: var(--accent); margin: 0; cursor: pointer; }
+  .sym-check:has(input:checked) { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,.08); }
+  .sym-checks input[type=text], #sym_custom {
+    width: 100%; background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--fg); padding: 6px 10px; font-size: 12px;
+  }
   .sig {
     border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
     background: var(--bg-soft); display: flex; flex-direction: column; gap: 5px;
@@ -246,9 +302,20 @@
 <header>
   <div class="header-inner">
     <div class="logo">
-      <div class="logo-mark">⚡</div>
+      <div class="logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- monogramme "m" de momBot -->
+          <path d="M10 45 V27 M10 33 c0-5 3.5-8 8-8 s8 3 8 8 v12 M26 33 c0-5 3.5-8 8-8 s8 3 8 8 v12"
+                stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- tendance momentum ascendante qui traverse le m -->
+          <path class="trend" d="M8 52 L24 42 L36 47 L52 20"
+                stroke="#0b1020" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
+          <!-- flèche de cassure en haut à droite -->
+          <path class="arrowhead" d="M45 14 h11 v11" stroke="#0b1020" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+        </svg>
+      </div>
       <div>
-        <h1><span>Momentum</span> Bot</h1>
+        <h1><span>mom</span><b>Bot</b><em>v1</em></h1>
         <p id="strategyLine">Momentum sur 10 bougies + RSI 6 · risque 8 % · levier 10x · TP +2.8 % / SL −1.0 %</p>
       </div>
     </div>
@@ -297,8 +364,8 @@
       <section class="card">
         <div class="card-head"><h2>🟢 Positions ouvertes</h2></div>
         <div class="card-body scroll-y" style="padding-top:4px">
-          <table><thead><tr><th>Symbole</th><th>Side</th><th>Entrée</th><th>Prix</th><th>Marge</th><th>Levier</th><th>Move %</th><th>PnL latent</th><th>SL → TP</th><th></th></tr></thead>
-          <tbody id="posBody"><tr><td colspan="10" class="empty">Aucune position ouverte</td></tr></tbody></table>
+          <table><thead><tr><th>Symbole</th><th>Side</th><th>Entrée (heure)</th><th>Durée</th><th>Prix entrée</th><th>Prix actuel</th><th>Marge</th><th>Levier</th><th>Move %</th><th>PnL latent</th><th>SL → TP</th><th></th></tr></thead>
+          <tbody id="posBody"><tr><td colspan="12" class="empty">Aucune position ouverte</td></tr></tbody></table>
         </div>
       </section>
 
@@ -306,17 +373,21 @@
       <section class="card">
         <div class="card-head"><h2>📜 Trades fermés</h2></div>
         <div class="card-body scroll-y" style="padding-top:4px">
-          <table><thead><tr><th>Clôturé</th><th>Symbole</th><th>Side</th><th>Entrée</th><th>Sortie</th><th>Raison</th><th>PnL</th></tr></thead>
-          <tbody id="tradesBody"><tr><td colspan="7" class="empty">Aucun trade fermé</td></tr></tbody></table>
+          <table><thead><tr><th>Clôturé</th><th>Entrée</th><th>Durée</th><th>Symbole</th><th>Side</th><th>Prix d'entrée</th><th>Sortie</th><th>Raison</th><th>PnL</th></tr></thead>
+          <tbody id="tradesBody"><tr><td colspan="9" class="empty">Aucun trade fermé</td></tr></tbody></table>
         </div>
       </section>
     </div>
 
     <!-- Right column : settings + logs -->
     <div class="col">
-      <section class="card">
-        <div class="card-head"><h2>⚙️ Paramètres du bot</h2><span style="font-size:10.5px;color:var(--muted)">appliqués en direct</span></div>
-        <div class="card-body">
+      <section class="card" id="paramsCard">
+        <div class="card-head clickable" onclick="toggleParams(event)" title="Cliquer pour replier / déplier">
+          <h2>⚙️ Paramètres du bot <span class="chev"></span></h2>
+          <span style="font-size:10.5px;color:var(--muted)">appliqués en direct</span>
+        </div>
+        <div class="params-summary" id="paramsSummary"></div>
+        <div class="card-body settings-body">
           <form class="settings-form" id="settingsForm" onsubmit="return saveSettings(event)" autocomplete="off">
             <div id="settingsGroups" style="display:grid;gap:12px"></div>
             <details class="pgroup" id="advWrap" style="display:none">
@@ -473,11 +544,13 @@ function renderTimeframes() {
 function renderSignals() {
   const grid = document.getElementById('sigGrid');
   const sigs = STATE.signals || {};
-  const keys = Object.keys(sigs);
+  const tracked = STATE.params?.symbols || SCHEMA.symbols || [];
+  // cartes pour toutes les paires suivies (même sans signal reçu pour l'instant) + celles en position
+  const keys = [...new Set([...tracked, ...Object.keys(sigs), ...STATE.positions.map(p => p.symbol)])];
   if (!keys.length) return;
   const P = currentParams();
   grid.innerHTML = keys.map(sym => {
-    const x = sigs[sym];
+    const x = sigs[sym] || {};
     let verdict = '— NEUTRE', cls = 'v-none', cardCls = '';
     if (x.changePct != null && x.rsi != null) {
       if (x.changePct > P.minMovePct && x.rsi > P.rsiLongMin) { verdict = 'LONG ▲'; cls = 'v-long'; cardCls = 'on-long'; }
@@ -509,10 +582,13 @@ function tpslBar(p) {
 
 function renderPositions() {
   const tb = document.getElementById('posBody');
-  if (!STATE.positions.length) { tb.innerHTML = '<tr><td colspan="10" class="empty">Aucune position ouverte</td></tr>'; return; }
+  if (!STATE.positions.length) { tb.innerHTML = '<tr><td colspan="12" class="empty">Aucune position ouverte</td></tr>'; return; }
+  const nowMs = Date.now();
   tb.innerHTML = STATE.positions.map(p => `<tr>
     <td class="mono">${shortSym(p.symbol)}</td>
     <td><span class="side-tag side-${p.side}">${p.side}</span></td>
+    <td class="mono" style="color:var(--muted)">${p.openedAt ? new Date(p.openedAt).toLocaleTimeString('fr-FR') : '—'}</td>
+    <td class="mono live-dur" data-opened="${p.openedAt || ''}" style="color:var(--muted)">${p.openedAt ? fmtDuration(nowMs - p.openedAt) : '—'}</td>
     <td class="mono">${p.entryPrice.toFixed(4)}</td>
     <td class="mono">${(p.currentPrice ?? p.entryPrice).toFixed(4)}</td>
     <td class="mono">${usd(p.margin)}</td>
@@ -524,11 +600,34 @@ function renderPositions() {
   </tr>`).join('');
 }
 
+function fmtDuration(ms) {
+  if (ms == null || !(ms >= 0)) return '—';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + ' s';
+  const m = Math.floor(s / 60), rs = s % 60;
+  if (m < 60) return m + ' min' + (rs ? ' ' + rs + ' s' : '');
+  const h = Math.floor(m / 60), rm = m % 60;
+  return h + ' h' + (rm ? ' ' + String(rm).padStart(2, '0') + ' min' : '');
+}
+
+// Tick "durée en direct" des positions ouvertes (re-render léger chaque seconde)
+setInterval(() => {
+  const cells = document.querySelectorAll('.live-dur');
+  if (!cells.length) return;
+  const nowMs = Date.now();
+  cells.forEach((c) => {
+    const o = Number(c.dataset.opened);
+    if (o) c.textContent = fmtDuration(nowMs - o);
+  });
+}, 1000);
+
 function renderTrades() {
   const tb = document.getElementById('tradesBody');
-  if (!STATE.trades.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">Aucun trade fermé</td></tr>'; return; }
+  if (!STATE.trades.length) { tb.innerHTML = '<tr><td colspan="9" class="empty">Aucun trade fermé</td></tr>'; return; }
   tb.innerHTML = STATE.trades.map(t => `<tr>
-    <td class="mono" style="color:var(--muted)">${new Date(t.closedAt).toLocaleTimeString('fr-FR')}</td>
+    <td class="mono" style="color:var(--muted)" title="${new Date(t.closedAt).toLocaleString('fr-FR')}">${new Date(t.closedAt).toLocaleTimeString('fr-FR')}</td>
+    <td class="mono" style="color:var(--muted)" title="${t.openedAt ? new Date(t.openedAt).toLocaleString('fr-FR') : ''}">${t.openedAt ? new Date(t.openedAt).toLocaleTimeString('fr-FR') : '—'}</td>
+    <td class="mono" style="color:var(--muted)">${fmtDuration(t.durationMs ?? (t.closedAt - t.openedAt))}</td>
     <td class="mono">${shortSym(t.symbol)}</td>
     <td><span class="side-tag side-${t.side}">${t.side}</span></td>
     <td class="mono">${t.entryPrice.toFixed(4)}</td>
@@ -686,6 +785,54 @@ function hideTip() { document.getElementById('chartTip').style.display = 'none';
 })();
 window.addEventListener('resize', () => STATE && drawChart());
 
+// ==================== Panneau paramètres repliable ====================
+const PARAMS_COLLAPSE_KEY = 'paramsCardCollapsed';
+
+function toggleParams(e) {
+  // Clic sur un élément interactif du header (bouton, lien...) : ne pas replier
+  if (e && e.target.closest('button, a, input, select')) return;
+  const card = document.getElementById('paramsCard');
+  const collapsed = !card.classList.contains('collapsed');
+  card.classList.toggle('collapsed', collapsed);
+  try { localStorage.setItem(PARAMS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
+}
+
+// Résumé affiché quand le panneau est replié ; badge « non appliquées » si ébauche en cours
+function updateParamsSummary() {
+  const el = document.getElementById('paramsSummary');
+  if (!el || !SCHEMA || !STATE) return;
+  const chips = [];
+  let dirtyCount = 0;
+  for (const k of ALL_KEYS()) {
+    const spec = SCHEMA.spec[k];
+    if (spec.order === 'advanced') continue;   // only key params in summary
+    if (k === 'symbols') {
+      const formEl = document.getElementById('in_symbols');
+      let v = serverValue('symbols') || [];
+      if (formEl) {
+        const iv = symList();
+        const diff = iv.length !== v.length || iv.some(s => !v.includes(s));
+        if (diff) dirtyCount++;
+        v = iv;
+      }
+      chips.push(`<span class="chip">${spec.label} <b>${v.map(shortSym).join(' · ')}</b></span>`);
+      continue;
+    }
+    const formEl = document.getElementById('in_' + k);
+    let v = serverValue(k);
+    if (formEl) {
+      const iv = inputValue(formEl, k);
+      if (Number.isFinite(iv) && iv !== v) { v = iv; dirtyCount++; }
+    }
+    chips.push(`<span class="chip">${spec.label} <b>${humanize(k, v)}</b></span>`);
+  }
+  let html = chips.join('');
+  if (dirtyCount > 0) {
+    html += `<span class="chip" style="border-color:#e0a458;color:#e0a458">● ${dirtyCount} modif. non appliquée(s)</span>`;
+  }
+  el.innerHTML = html;
+}
+
 // ==================== Panneau paramètres ====================
 function buildSettings() {
   const groupsEl = document.getElementById('settingsGroups');
@@ -712,6 +859,35 @@ function mkField(k) {
   const spec = SCHEMA.spec[k];
   const div = document.createElement('div');
   div.className = 'field';
+  if (spec.type === 'symbols') {
+    // Cases à cocher : univers de paires connues + champ libre pour une paire exotique
+    div.innerHTML = `<label>${spec.label}<span class="def">sélection active : ${(SCHEMA.params.symbols || []).length}</span></label>
+      <div class="sym-checks" id="in_${k}" data-symchecks></div>
+      <input type="text" id="sym_custom" placeholder="Ajouter une paire exotique, ex. TON/USDT:USDT" style="margin-top:8px" />
+      <div class="hint">${spec.help || ''} · max 20 paires</div>`;
+    renderSymChecks(div.querySelector('[data-symchecks]'), [...new Set([...(SCHEMA.symbolUniverse || []), ...(SCHEMA.params.symbols || [])])]);
+    const custom = div.querySelector('#sym_custom');
+    custom.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const raw = custom.value.trim().toUpperCase();
+      if (!raw) return;
+      const sym = raw.includes('/') ? (raw.endsWith(':USDT') ? raw : raw + ':USDT') : raw.split(':')[0] + '/USDT:USDT';
+      const wrap = div.querySelector('[data-symchecks]');
+      if (!wrap.querySelector(`input[value="${sym}"]`)) {
+        const lab = document.createElement('label');
+        lab.className = 'sym-check';
+        lab.innerHTML = `<input type="checkbox" value="${sym}" /><span>${shortSym(sym)}</span>`;
+        lab.querySelector('input').addEventListener('change', updateDirty);
+        wrap.appendChild(lab);
+      }
+      const box = wrap.querySelector(`input[value="${sym}"]`);
+      box.checked = true;
+      custom.value = '';
+      updateDirty();
+    });
+    return div;
+  }
   if (spec.type === 'enum') {
     div.innerHTML = `<label>${spec.label}</label>
       <select id="in_${k}" name="${k}">${spec.values.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
@@ -730,9 +906,33 @@ function mkField(k) {
   return div;
 }
 
+// ---------- champ « paires » (cases à cocher) ----------
+function renderSymChecks(wrap, universe) {
+  wrap.innerHTML = '';
+  for (const sym of universe) {
+    const lab = document.createElement('label');
+    lab.className = 'sym-check';
+    lab.innerHTML = `<input type="checkbox" value="${sym}" /><span>${shortSym(sym)}</span>`;
+    lab.querySelector('input').addEventListener('change', updateDirty);
+    wrap.appendChild(lab);
+  }
+}
+
+function symBoxes() {
+  return [...document.querySelectorAll('#in_symbols input[type=checkbox]')];
+}
+function symList() {
+  return symBoxes().filter(b => b.checked).map(b => b.value);
+}
+
 function syncSettingsValues() {
   if (!SCHEMA || !STATE) return;
   for (const k of ALL_KEYS()) {
+    if (k === 'symbols') {
+      const cur = serverValue('symbols') || [];
+      symBoxes().forEach(b => { b.checked = cur.includes(b.value); });
+      continue;
+    }
     const el = document.getElementById('in_' + k);
     if (!el || el === document.activeElement) continue; // ne pas écraser la saisie en cours
     el.value = serverValue(k);
@@ -741,10 +941,13 @@ function syncSettingsValues() {
 
 function serverValue(k) {
   if (!STATE) return null;
-  return k === 'timeframe' ? STATE.timeframe : (STATE.params ? STATE.params[k] : SCHEMA?.params?.[k]);
+  if (k === 'timeframe') return STATE.timeframe;
+  const src = STATE.params ? STATE.params[k] : SCHEMA?.params?.[k];
+  return k === 'symbols' ? [...(src || [])] : src;
 }
 
 function inputValue(el, k) {
+  if (SCHEMA.spec[k].type === 'symbols') return symList();
   if (SCHEMA.spec[k].type === 'enum') return el.value;
   return el.value === '' ? NaN : Number(el.value);
 }
@@ -753,10 +956,18 @@ function updateDirty() {
   if (!SCHEMA) return;
   let n = 0;
   for (const k of ALL_KEYS()) {
-    const el = document.getElementById('in_' + k);
-    if (!el) continue;
-    const dirty = inputValue(el, k) !== serverValue(k);
-    el.classList.toggle('dirty', dirty);
+    let dirty;
+    if (k === 'symbols') {
+      const a = symList(), b = serverValue('symbols') || [];
+      dirty = a.length !== b.length || a.some(s => !b.includes(s));
+      const wrap = document.getElementById('in_symbols');
+      if (wrap) wrap.classList.toggle('dirty', dirty);
+    } else {
+      const el = document.getElementById('in_' + k);
+      if (!el) continue;
+      dirty = inputValue(el, k) !== serverValue(k);
+      el.classList.toggle('dirty', dirty);
+    }
     if (dirty) n++;
   }
   const badge = document.getElementById('dirtyBadge');
@@ -765,6 +976,7 @@ function updateDirty() {
   badge.textContent = `● ${n} modification(s) non appliquée(s)`;
   btn.disabled = !n;
   updatePreview();
+  updateParamsSummary();
 }
 
 // Aperçu en direct du dimensionnement et du R/R selon l'ébauche du formulaire
@@ -792,6 +1004,11 @@ function updatePreview() {
 function collectPatch() {
   const patch = {};
   for (const k of ALL_KEYS()) {
+    if (k === 'symbols') {
+      const a = symList(), b = serverValue('symbols') || [];
+      if (a.length !== b.length || a.some(s => !b.includes(s))) patch[k] = a;
+      continue;
+    }
     const el = document.getElementById('in_' + k);
     if (!el) continue;
     const val = inputValue(el, k);
@@ -856,6 +1073,13 @@ function closePosition(encSym) {
 
 ensureSchema().catch(() => {});
 connect();
+
+// Restaurer l'état replié/déplié du panneau paramètres (mémoire navigateur)
+try {
+  if (localStorage.getItem(PARAMS_COLLAPSE_KEY) === '1') {
+    document.getElementById('paramsCard').classList.add('collapsed');
+  }
+} catch (_) {}
 </script>
 </body>
 </html>

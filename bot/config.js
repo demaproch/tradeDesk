@@ -41,6 +41,7 @@ const CONFIG = {
   // --- Règles supplémentaires ---
   cooldownMs: 5 * 60 * 1000,      // 5 minutes entre deux trades sur le même symbole
   maxOnePositionPerSymbol: true,  // une seule position à la fois par symbole
+  feePct: 0.04,                   // frais taker estimés par jambe en % (binance futures ~0.04-0.05%)
 
   // --- Dashboard ---
   port: 3000,                     // port HTTP du dashboard

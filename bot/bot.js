@@ -4,7 +4,18 @@
 //   node bot.js              -> paper trading avec prix réels Binance
 //   node bot.js --demo       -> données simulées (fonctionne sans internet)
 //
-// Dashboard : http://localhost:3000
+// Points clés (corrections "bot qui ne fait que perdre") :
+//   1. Les signaux sont calculés UNIQUEMENT sur des clôtures dures de
+//      bougies closes (la dernière bougie de l'API, en cours de formation,
+//      est écartée). Fini les entrées au milieu d'une bougie qui se
+//      retournent immédiatement contre nous.
+//   2. Un trade n'est ouvert qu'une fois par nouvelle bougie close
+//      (détection sur le timestamp de la dernière clôture), pas à chaque
+//      cycle de 5 s sur la même bougie.
+//   3. TP/SL évalués sur les clôtures, exécutés AUX PRIX EXACTS du TP/SL.
+//   4. Frais taker estimés (feePct par jambe) déduits du PnL réalisé.
+//
+// momBot — Dashboard : http://localhost:3000
 // ============================================================
 
 const path = require('path');
@@ -16,7 +27,8 @@ const ccxt = require('ccxt');
 const CONFIG = require('./config');
 const { rsi, priceChangePct } = require('./indicators');
 const TradingEngine = require('./engine');
-const { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, validatePatch, editableKeys } = require('./params');
+const { TF_MS, closedCandles, aggregate } = require('./candles');
+const { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, validatePatch, editableKeys, symbolUniverse, perpSymbol, validateSymbolOnExchange } = require('./params');
 
 // Persistance des paramètres modifiés via le dashboard (survivants aux redémarrages)
 const PARAMS_FILE = path.join(__dirname, 'params.overrides.json');
@@ -42,6 +54,13 @@ function saveOverrides() {
 
 const DEMO = process.argv.includes('--demo');
 
+/** Prix de départ déterministe en mode démo pour une paire hors liste connue. */
+function hashPrice(sym) {
+  let h = 0;
+  for (const ch of String(sym)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return Math.pow(10, 1 + (h % 5)); // 10 … 100 000
+}
+
 // ---------- Source de données (prix réels ou démo) ----------
 
 class MarketData {
@@ -56,7 +75,7 @@ class MarketData {
       // prix de base réalistes par symbole pour le mode démo
       const bases = { 'BTC/USDT:USDT': 65000, 'ETH/USDT:USDT': 3200, 'SOL/USDT:USDT': 150, 'AVAX/USDT:USDT': 35, 'SUI/USDT:USDT': 1.2 };
       for (const sym of this.cfg.symbols) {
-        let p = bases[sym] ?? 100;
+        let p = bases[sym] ?? hashPrice(sym);
         const candles = [];
         for (let i = 0; i < this.cfg.candlesLimit; i++) {
           p *= 1 + (Math.random() - 0.5) * 0.004;
@@ -84,7 +103,31 @@ class MarketData {
     console.log(`🌐 Mode LIVE DATA : prix réels depuis ${CONFIG.exchange} (${CONFIG.marketType}).`);
   }
 
-  /** Renvoie les N dernières bougies [{close}] pour un symbole */
+  /** S'assure que l'exchange est chargé et que `sym` est un marché connu ; renvoie null ou un message d'erreur. */
+  async ensureSymbol(sym) {
+    if (DEMO) {
+      if (!this.demoState.has(sym)) {
+        let p = hashPrice(sym);
+        const candles = [];
+        for (let i = 0; i < this.cfg.candlesLimit; i++) {
+          p *= 1 + (Math.random() - 0.5) * 0.004;
+          candles.push({ close: p });
+        }
+        this.demoState.set(sym, { price: p, candles, drift: (Math.random() - 0.5) * 0.002 });
+      }
+      return null;
+    }
+    return validateSymbolOnExchange(this.exchange, sym);
+  }
+
+  /** Timeframe de récupération : 1m si le timeframe cible n'existe pas nativement (ex. 3m), agrégé ensuite. */
+  baseTimeframe() {
+    const tf = this.cfg.timeframe;
+    if (tf !== '3m' || DEMO) return tf;
+    return '1m';
+  }
+
+  /** Renvoie les bougies CLOSES du timeframe cible [{time?, open?, high?, low?, close}] */
   async fetchCandles(symbol) {
     if (DEMO) {
       const st = this.demoState.get(symbol);
@@ -93,15 +136,24 @@ class MarketData {
       st.price *= 1 + st.drift + (Math.random() - 0.5) * 0.003;
       st.candles.push({ close: st.price });
       if (st.candles.length > this.cfg.candlesLimit) st.candles.shift();
+      // en démo, la dernière "bougie" est considérée comme fermée à chaque cycle
       return st.candles.slice(-this.cfg.candlesLimit);
     }
+    const baseTf = this.baseTimeframe();
     const ohlcv = await this.exchange.fetchOHLCV(
       symbol,
-      this.cfg.timeframe,
+      baseTf,
       undefined,
       this.cfg.candlesLimit
     );
-    return ohlcv.map((c) => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] }));
+    let candles = ohlcv.map((c) => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] }));
+    // agrège si nécessaire (ex. 1m -> 3m) ; sinon retire la bougie en cours de formation
+    if (baseTf !== this.cfg.timeframe) {
+      candles = aggregate(candles, TF_MS[baseTf], TF_MS[this.cfg.timeframe]);
+    } else {
+      candles = closedCandles(candles);
+    }
+    return candles;
   }
 }
 
@@ -115,8 +167,9 @@ class MomentumBot {
     this.timer = null;
     this.running = false;
     this.paused = false;     // pause via le dashboard (le timer tourne, les cycles sont ignorés)
-    this.prices = {};        // symbol -> dernier prix connu
+    this.prices = {};        // symbol -> dernier prix de CLÔTURE connue (mark-to-market)
     this.signals = {};       // symbol -> dernière lecture d'indicateurs (dashboard)
+    this.lastCandleTime = new Map(); // symbol -> timestamp de la dernière bougie close traitée
     this.onChange = () => {}; // callback push vers le dashboard
   }
 
@@ -124,7 +177,7 @@ class MomentumBot {
     if (this.running) return;
     this.running = true;
     this.paused = false;
-    this.engine.log('INFO', `Bot démarré | timeframe=${this.cfg.timeframe} | cycle=${this.cfg.cycleMs / 1000}s | capital=${this.engine.capital}$`);
+    this.engine.log('INFO', `Bot démarré | timeframe=${this.cfg.timeframe} | cycle=${this.cfg.cycleMs / 1000}s | capital=${this.engine.capital.toFixed(2)}$ | frais=${this.cfg.feePct}%/jambe`);
     this.runCycle(); // premier cycle immédiat
     this.restartTimer();
   }
@@ -150,22 +203,17 @@ class MomentumBot {
     if (this.running) this.timer = setInterval(() => this.runCycle(), this.cfg.cycleMs);
   }
 
-  setTimeframe(tf) {
-    if (!TIMEFRAMES.includes(tf)) return false;
-    this.cfg.timeframe = tf;
-    this.engine.log('INFO', `Timeframe changé -> ${tf}`);
-    this.onChange();
-    return true;
-  }
-
   /**
    * Applique un patch de paramètres validé (via params.js).
    * Le timer est redémarré si cycleMs change ; TP/SL des positions ouvertes sont recalculés.
+   * Les paires doivent être vérifiées AVANT appel (async) : ici application synchrone.
    * @returns {{ok:boolean, error?:string, applied?:object}}
    */
   applyParams(patch) {
     const res = validatePatch(patch, this.cfg);
     if (!res.ok) return res;
+    const tfChanged = 'timeframe' in res.changes && res.changes.timeframe !== this.cfg.timeframe;
+    const symbolsChanged = Array.isArray(res.changes.symbols);
     for (const [k, v] of Object.entries(res.changes)) this.cfg[k] = v;
     saveOverrides();
     if ('cycleMs' in res.changes) this.restartTimer();
@@ -174,9 +222,41 @@ class MomentumBot {
       pos.tpPct = this.cfg.takeProfitPct;
       pos.slPct = this.cfg.stopLossPct;
     }
-    this.engine.log('INFO', `Paramètres mis à jour : ${Object.entries(res.changes).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+    // Changement de timeframe : on repart sur un état propre (pas de mélange de séries)
+    if (tfChanged) {
+      this.lastCandleTime.clear();
+      this.engine.rebuildEquityHistory();
+      this.engine.log('INFO', `Timeframe changé -> ${this.cfg.timeframe} (série d'équité reconstruite)`);
+    } else if (symbolsChanged) {
+      // Nettoyage des lectures fantômes des paires retirées ; les positions ouvertes
+      // restent gérées (TP/SL) jusqu'à leur fermeture, même si la paire est décochée.
+      for (const sym of Object.keys(this.signals)) {
+        if (!this.cfg.symbols.includes(sym)) delete this.signals[sym];
+      }
+      this.engine.log('INFO', `Paires mises à jour (${this.cfg.symbols.length}) : ${this.cfg.symbols.join(', ')}`);
+    } else {
+      this.engine.log('INFO', `Paramètres mis à jour : ${Object.entries(res.changes).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join('+') : v}`).join(', ')}`);
+    }
     this.onChange();
     return { ok: true, applied: res.changes };
+  }
+
+  /**
+   * Version asynchrone : valide le patch puis vérifie chaque nouvelle paire sur l'exchange
+   * avant application (refus explicite si un marché est inconnu).
+   */
+  async applyParamsAsync(patch) {
+    const res = validatePatch(patch, this.cfg);
+    if (!res.ok) return res;
+    if (Array.isArray(res.changes.symbols)) {
+      const current = new Set(this.cfg.symbols);
+      for (const sym of res.changes.symbols) {
+        if (current.has(sym)) continue; // déjà utilisé, déjà vérifié
+        const err = await this.market.ensureSymbol(sym);
+        if (err) return { ok: false, error: `Paire refusée : ${err}` };
+      }
+    }
+    return this.applyParams(res.changes);
   }
 
   resetParams() {
@@ -189,12 +269,11 @@ class MomentumBot {
   async runCycle() {
     if (!this.running || this.paused) return;
     try {
-      for (const symbol of this.cfg.symbols) {
+      const symbols = [...new Set([...this.cfg.symbols, ...this.engine.positions.keys()])];
+      for (const symbol of symbols) {
         await this.processSymbol(symbol);
       }
-      // Point d'équité : cash réalisé + PnL latent uniquement.
-      // (La marge engagée des positions ouvertes reste comptée dans le cash ;
-      // elle n'est JAMAIS re-additionnée — c'était l'ancien bug.)
+      // Point d'équité : cash réalisé + PnL latent uniquement (jamais la marge).
       const eq = this.engine.equity(this.prices);
       const last = this.engine.equityHistory[this.engine.equityHistory.length - 1];
       if (!last || Math.abs(last.equity - eq) > 0.005) {
@@ -231,35 +310,44 @@ class MomentumBot {
     if (!candles || candles.length < this.cfg.lookbackCandles + 1) return;
 
     const closes = candles.map((c) => c.close);
-    const price = closes[closes.length - 1];
-    this.prices[symbol] = price;
+    const closePrice = closes[closes.length - 1]; // clôture dure de la dernière bougie CLOSE
+    this.prices[symbol] = closePrice;
+    const tracked = this.cfg.symbols.includes(symbol);
 
+    // ----- 1) Gestion de sortie prioritaire : TP / SL sur la clôture -----
     const pos = this.engine.positions.get(symbol);
-
-    // ----- 1) Gestion de sortie prioritaire : TP / SL -----
     if (pos) {
-      const exit = this.engine.checkExit(pos, price);
+      const exit = this.engine.checkExit(pos, closePrice);
       if (exit) {
-        this.engine.closePosition(symbol, price, exit);
+        // exécuté AU PRIX EXACT du TP/SL (comme un ordre conditionnel réel),
+        // pas à la clôture qui peut avoir slippé plus loin
+        this.engine.closePosition(symbol, exit.price, exit.kind);
       }
     }
 
-    // ----- 2) Détection du signal d'entrée -----
+    // ----- 2) Détection du signal d'entrée (une fois par nouvelle bougie close) -----
+    const candleTime = candles[candles.length - 1].time;
+    const prevTime = this.lastCandleTime.get(symbol);
+    const isNewCandle = candleTime == null ? true : candleTime !== prevTime;
+    if (candleTime != null) this.lastCandleTime.set(symbol, candleTime);
+
     const changePct = priceChangePct(candles, this.cfg.lookbackCandles);
     const r = rsi(closes, this.cfg.rsiPeriod);
-    this.signals[symbol] = { changePct, rsi: r, price };
+    if (tracked) this.signals[symbol] = { changePct, rsi: r, price: closePrice, candleTime: candleTime ?? null };
 
+    if (!tracked) return;                // paire décochée : gestion de sortie uniquement
+    if (!isNewCandle) return;            // même bougie déjà traitée : pas de re-entry
     if (changePct == null || r == null) return;
-    if (pos) return;                       // déjà une position sur ce symbole
-    if (!this.engine.canOpen(symbol)) return; // cooldown en cours
+    if (this.engine.positions.has(symbol)) return; // déjà une position sur ce symbole
+    if (!this.engine.canOpen(symbol)) return;      // cooldown en cours
 
     const longSignal = changePct > this.cfg.minMovePct && r > this.cfg.rsiLongMin;
     const shortSignal = changePct < -this.cfg.minMovePct && r < this.cfg.rsiShortMax;
 
     if (longSignal) {
-      this.engine.openPosition(symbol, 'LONG', price, { changePct, rsi: r });
+      this.engine.openPosition(symbol, 'LONG', closePrice, { changePct, rsi: r });
     } else if (shortSignal) {
-      this.engine.openPosition(symbol, 'SHORT', price, { changePct, rsi: r });
+      this.engine.openPosition(symbol, 'SHORT', closePrice, { changePct, rsi: r });
     }
   }
 }
@@ -304,14 +392,15 @@ async function main() {
       groups: PARAM_GROUPS,
       timeframes: TIMEFRAMES,
       symbols: CONFIG.symbols,
+      symbolUniverse: symbolUniverse(CONFIG.symbols),
       initialCapital: CONFIG.initialCapital,
       maxLeverage: CONFIG.maxLeverage,
     });
   });
 
-  // API : modifier les paramètres via le dashboard (patch validé)
-  app.post('/api/params', (req, res) => {
-    const result = bot.applyParams(req.body || {});
+  // API : modifier les paramètres via le dashboard (patch validé ; paires vérifiées sur l'exchange)
+  app.post('/api/params', async (req, res) => {
+    const result = await bot.applyParamsAsync(req.body || {});
     res.status(result.ok ? 200 : 400).json({ ...result, state: statePayload() });
   });
 
