@@ -129,20 +129,29 @@ class AuthManager {
 
   // ---------- Express middleware ----------
 
-  /** Protège tout ce qui n'est pas /login, /api/login, /api/logout, /api/csrf. */
+  /** Protège tout ce qui n'est pas la page de login ni les routes d'authentification. */
   requireAuth(publicDir) {
     return (req, res, next) => {
       const p = req.path;
-      if (p === '/login.html' || p === '/auth.css') return res.sendFile(path.join(publicDir, p.replace('/', '')));
+      if (p === '/login' || p === '/login.html') return res.sendFile(path.join(publicDir, 'login.html'));
+      // favicon : autorisé sans session (sinon 302 → échec du fetch)
+      if (p === '/favicon.ico' || p === '/favicon.svg') return next();
       if (p === '/api/login' || p === '/api/logout' || p === '/api/csrf') return next();
       const sess = this.getSession(req);
       if (!sess) {
-        if (p.startsWith('/api/')) return res.status(401).json({ error: 'Non authentifié.' });
+        if (p.startsWith('/api/') || p.startsWith('/ws')) return res.status(401).json({ error: 'Non authentifié.' });
         return res.redirect('/login');
       }
       req.session = sess;
       next();
     };
+  }
+
+  /** Route GET /api/me : le dashboard vérifie la session et récupère son jeton CSRF. */
+  handleMe(req, res) {
+    const sess = this.getSession(req);
+    if (!sess) return res.status(401).json({ authenticated: false });
+    res.json({ authenticated: true, csrf: sess.csrf });
   }
 
   /** Toute méthode mutante sur /api/* exige le jeton CSRF (sauf login/logout). */

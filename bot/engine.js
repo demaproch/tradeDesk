@@ -251,6 +251,20 @@ class TradingEngine {
   }
 
   /**
+   * Réinitialise le carnet paper avec un nouveau capital de départ :
+   * positions clôturées virtuellement au prix d'entrée, historique effacé.
+   * À n'appeler qu'en mode paper (le bot refuse sinon).
+   */
+  resetBook(newCapital) {
+    for (const [sym, pos] of [...this.positions]) this.positions.delete(sym);
+    this.capital = newCapital;
+    this.closedTrades = [];
+    this.lastTradeTime.clear();
+    this.equityHistory = [{ t: Date.now(), equity: newCapital }];
+    this.log('INFO', `Carnet réinitialisé : nouveau capital=${newCapital}$`);
+  }
+
+  /**
    * Historique d'équité recalculé à partir des trades fermés uniquement.
    * equity(t) = capital initial + Σ PnL nets réalisés dont closedAt <= t.
    */
