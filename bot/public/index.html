@@ -148,8 +148,9 @@
     border-top: 6px solid var(--muted); transition: transform .22s ease;
   }
   .card.collapsed .chev { transform: rotate(-90deg); }
+  /* !important : le body des clés a un style inline (display:grid) posé par JS qui écrasait la règle de repli */
   .card.collapsed .card-body.settings-body,
-  .card.collapsed .card-body.keys-body { display: none; }
+  .card.collapsed .card-body.keys-body { display: none !important; }
   .card.collapsed .card-head { border-bottom: none; }
   .keys-summary {
     display: none; flex-wrap: wrap; gap: 6px; padding: 10px 18px;
