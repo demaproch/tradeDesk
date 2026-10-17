@@ -24,6 +24,7 @@ function fmtDuration(ms) {
 class TradingEngine {
   constructor(config = CONFIG) {
     this.cfg = config;
+    this.startEquity = config.initialCapital; // référence d'origine du graphique (figée au 1er cycle)
     this.capital = config.initialCapital;   // capital réalisé (cash)
     this.positions = new Map();             // symbol -> position ouverte
     this.closedTrades = [];                 // historique des trades fermés
@@ -246,7 +247,11 @@ class TradingEngine {
   }
 
   recordEquity(pricesBySymbol) {
-    this.equityHistory.push({ t: Date.now(), equity: this.equity(pricesBySymbol) });
+    const eq = this.equity(pricesBySymbol);
+    // Ne jamais écraser la référence d'origine : le premier point enregistré
+    // (capital réel au démarrage du bot) sert de ligne de départ au graphique.
+    if (!this.equityHistory.length) this.startEquity = eq;
+    this.equityHistory.push({ t: Date.now(), equity: eq });
     if (this.equityHistory.length > 2000) this.equityHistory.shift();
   }
 
@@ -260,16 +265,17 @@ class TradingEngine {
     this.capital = newCapital;
     this.closedTrades = [];
     this.lastTradeTime.clear();
+    this.startEquity = newCapital;
     this.equityHistory = [{ t: Date.now(), equity: newCapital }];
     this.log('INFO', `Carnet réinitialisé : nouveau capital=${newCapital}$`);
   }
 
   /**
    * Historique d'équité recalculé à partir des trades fermés uniquement.
-   * equity(t) = capital initial + Σ PnL nets réalisés dont closedAt <= t.
+   * equity(t) = capital de départ + Σ PnL nets réalisés dont closedAt <= t.
    */
   rebuildEquityHistory() {
-    const start = this.cfg.initialCapital;
+    const start = this.startEquity ?? this.cfg.initialCapital;
     const sorted = [...this.closedTrades].sort((a, b) => a.closedAt - b.closedAt);
     let run = start;
     const hist = [{ t: sorted.length ? sorted[0].closedAt - 1 : Date.now(), equity: run }];
@@ -326,6 +332,7 @@ class TradingEngine {
       capital: this.capital,
       equity: this.equity(pricesBySymbol),
       unrealized: this.totalUnrealized(pricesBySymbol),
+      startEquity: this.startEquity ?? this.cfg.initialCapital,
       timeframe: this.cfg.timeframe,
       params,
       cooldowns,
