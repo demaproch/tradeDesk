@@ -285,8 +285,20 @@ class MomentumBot {
     this.onChange = () => {}; // callback push vers le dashboard
   }
 
+  /**
+   * Le graphique doit TOUJOURS suivre l'évolution réelle : on repart d'une série
+   * vide à chaque (re)start. Évite les paliers trompeurs quand des trades ont été
+   * fermés alors que le bot était arrêté/en pause (les points manquent et la
+   * reconstruction « trades-only » écrasait l'historique avec un seul point).
+   */
+  resetEquitySeries() {
+    this.engine.equityHistory = [];
+    this.engine.startEquity = this.engine.capital;
+  }
+
   start() {
     if (this.running) return;
+    this.resetEquitySeries();
     this.running = true;
     this.paused = false;
     this.engine.log('INFO', `Bot démarré | timeframe=${this.cfg.timeframe} | cycle=${this.cfg.cycleMs / 1000}s | capital=${this.engine.capital.toFixed(2)}$ | frais=${this.cfg.feePct}%/jambe`);
@@ -418,6 +430,10 @@ class MomentumBot {
       const last = this.engine.equityHistory[this.engine.equityHistory.length - 1];
       if (!last || Math.abs(last.equity - eq) > 0.005) {
         this.engine.recordEquity(this.prices);
+      } else if (this.engine.equityHistory.length < 2) {
+        // Rien n'a bougé (flat) : au moins un second point pour que le graphique
+        // puisse s'écheller et tracer dès le premier cycle.
+        this.engine.equityHistory.push({ t: Date.now(), equity: eq });
       }
       this.onChange();
     } catch (e) {
