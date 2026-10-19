@@ -255,6 +255,9 @@
   .field label { display: flex; justify-content: space-between; align-items: baseline; font-size: 10.5px; font-weight: 700; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.06em; }
   .field label .def { font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 10px; opacity: .8; }
   .input-wrap { position: relative; }
+  .field .switch-row { display: flex; align-items: center; gap: 8px; text-transform: none; font-size: 12.5px; color: var(--text); cursor: pointer; }
+  .field .switch-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .field input[type="text"] { width: 100%; background: var(--panel2, rgba(255,255,255,.03)); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; color: var(--text); font-size: 12.5px; font-family: inherit; }
   .field input[type="number"], .field select {
     width: 100%; padding: 9px 42px 9px 12px; border-radius: 9px;
     background: var(--panel); border: 1px solid var(--border);
@@ -267,7 +270,7 @@
     position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
     font: 700 11px 'JetBrains Mono'; color: var(--muted); pointer-events: none;
   }
-  .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.12); }
+  .field input:focus, .field select:focus, .field input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.12); }
   .field .hint { font-size: 10.5px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
   .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .save-msg { font-size: 12px; min-height: 16px; line-height: 1.4; }
@@ -275,7 +278,7 @@
   .dirty-badge { display:none; align-self:center; font-size: 11px; color: var(--amber); font-weight: 700; }
 
   /* Dirty (unsaved) fields */
-  .field input.dirty, .field select.dirty { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(251,191,36,.12); }
+  .field input.dirty, .field select.dirty, .field input[type="text"].dirty { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(251,191,36,.12); }
 
   /* Live preview of sizing / R/R */
   .preview { border: 1px dashed var(--border-strong); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; background: rgba(56,189,248,.03); }
@@ -423,6 +426,28 @@
             </div>
             <div class="save-msg" id="saveMsg"></div>
           </form>
+        </div>
+      </section>
+
+      <!-- Notifications push (Telegram / webhook) -->
+      <section class="card" id="alertsCard">
+        <div class="card-head clickable" onclick="toggleCard('alertsCardBody', this)" title="Cliquer pour replier / déplier">
+          <h2>📲 Notifications <span class="chev"></span></h2>
+          <span style="font-size:10.5px;color:var(--muted)" id="alertsChip">non configurées</span>
+        </div>
+        <div class="card-body" id="alertsCardBody" style="display:none">
+          <div class="field"><label>Token bot Telegram<span class="def">@BotFather</span></label>
+            <input type="text" id="inpTgToken" placeholder="123456:ABC-DEF…" autocomplete="off" /></div>
+          <div class="field"><label>Chat ID Telegram<span class="def">@userinfobot</span></label>
+            <input type="text" id="inpTgChat" placeholder="ex. 123456789" autocomplete="off" /></div>
+          <div class="field"><label>Webhook JSON (optionnel)</label>
+            <input type="text" id="inpHook" placeholder="https://…/hook — reçoit {source,text}" autocomplete="off" /></div>
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary" onclick="saveAlerts()">💾 Enregistrer</button>
+            <button type="button" class="btn" onclick="testAlerts()" id="btnTestAlerts">📨 Envoyer un test</button>
+          </div>
+          <div class="save-msg" id="alertsMsg"></div>
+          <div class="hint" style="margin-top:8px">Reçoit les clôtures de trades (TP/SL/MANUEL), les erreurs réseau et les alertes de drawdown.</div>
         </div>
       </section>
 
@@ -1096,6 +1121,14 @@ function mkField(k) {
     div.innerHTML = `<label>${spec.label}</label>
       <select id="in_${k}" name="${k}">${spec.values.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
       <div class="hint">${spec.help || ''}</div>`;
+  } else if (spec.type === 'bool') {
+    div.innerHTML = `<label class="switch-row"><input type="checkbox" id="in_${k}" name="${k}" ${SCHEMA.params[k] ? 'checked' : ''} />
+        <span>${spec.label}</span></label>
+      <div class="hint">${spec.help || ''}</div>`;
+  } else if (spec.type === 'string') {
+    div.innerHTML = `<label>${spec.label}<span class="def">ex. « 13-21 » ou vide</span></label>
+      <input type="text" id="in_${k}" name="${k}" value="${SCHEMA.params[k] ?? ''}" placeholder="(vide = toujours)" />
+      <div class="hint">${spec.help || ''}</div>`;
   } else {
     const step = spec.step ?? (spec.type === 'int' ? 1 : 'any');
     div.innerHTML = `<label>${spec.label}<span class="def">défaut : ${humanize(k, SCHEMA.defaults[k])}</span></label>
@@ -1139,7 +1172,8 @@ function syncSettingsValues() {
     }
     const el = document.getElementById('in_' + k);
     if (!el || el === document.activeElement) continue; // ne pas écraser la saisie en cours
-    el.value = serverValue(k);
+    if (SCHEMA.spec[k] && SCHEMA.spec[k].type === 'bool') el.checked = !!serverValue(k);
+    else el.value = serverValue(k);
   }
 }
 
@@ -1151,8 +1185,11 @@ function serverValue(k) {
 }
 
 function inputValue(el, k) {
-  if (SCHEMA.spec[k].type === 'symbols') return symList();
-  if (SCHEMA.spec[k].type === 'enum') return el.value;
+  const t = SCHEMA.spec[k].type;
+  if (t === 'symbols') return symList();
+  if (t === 'enum') return el.value;
+  if (t === 'bool') return !!el.checked;
+  if (t === 'string') return el.value.trim();
   return el.value === '' ? NaN : Number(el.value);
 }
 
@@ -1313,6 +1350,55 @@ function renderSecurity() {
   document.getElementById('btnTestKeys').style.display = sec.realActive ? '' : 'none';
   document.getElementById('btnPaper').style.display = sec.tradingMode === 'real' ? '' : 'none';
   updateKeysSummary();
+  renderAlertsChip();
+}
+
+// ==================== Notifications push ====================
+let ALERTS_CFG_MEM = { tg: '', chat: '', hook: '' }; // ne pas repartir du client si on rouvre la carte
+
+function alertsStatus() { return STATE?.alerts || SCHEMA?.alerts || {}; }
+
+function renderAlertsChip() {
+  const st = alertsStatus();
+  const chip = document.getElementById('alertsChip');
+  if (!chip) return;
+  const parts = [];
+  if (st.telegramConfigured) parts.push('Telegram ✓');
+  if (st.webhookConfigured) parts.push('Webhook ✓');
+  chip.textContent = parts.length ? parts.join(' · ') : 'non configurées';
+  chip.style.color = parts.length ? '#6ee7a7' : 'var(--muted)';
+  const lr = st.lastResult;
+  if (lr && Date.now() - lr.at < 120000) {
+    const m = document.getElementById('alertsMsg');
+    if (m) { m.className = 'save-msg ' + (lr.ok ? 'ok' : 'err'); m.textContent = lr.ok ? `Dernier envoi : ${lr.summary}` : `Dernier envoi échoué : ${lr.summary}`; }
+  }
+}
+
+async function saveAlerts() {
+  const msg = document.getElementById('alertsMsg');
+  const body = {
+    telegramToken: document.getElementById('inpTgToken').value.trim(),
+    telegramChatId: document.getElementById('inpTgChat').value.trim(),
+    webhookUrl: document.getElementById('inpHook').value.trim(),
+  };
+  const res = await postJson('/api/alerts/config', body);
+  if (res.ok) {
+    msg.className = 'save-msg ok'; msg.textContent = '✅ Configuration enregistrée (locale au dashboard).';
+    ['inpTgToken', 'inpTgChat', 'inpHook'].forEach(id => document.getElementById(id).value = '');
+  } else {
+    msg.className = 'save-msg err'; msg.textContent = '❌ ' + (res.error || 'Échec');
+  }
+  renderAlertsChip();
+}
+
+async function testAlerts() {
+  const msg = document.getElementById('alertsMsg');
+  msg.className = 'save-msg'; msg.textContent = 'Envoi du test…';
+  const res = await postJson('/api/alerts/test', {});
+  const st = res.status?.lastResult || {};
+  msg.className = 'save-msg ' + (res.ok ? 'ok' : 'err');
+  msg.textContent = res.ok ? '✅ Test envoyé.' : `❌ ${st.summary || res.error || 'Échec de test'}`;
+  renderAlertsChip();
 }
 
 async function saveKeys() {

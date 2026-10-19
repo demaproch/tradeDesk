@@ -82,6 +82,47 @@ class TradingEngine {
     return null;
   }
 
+  // ---------- Trailing stop / break-even (désactivables via cfg) ----------
+
+  /** Prix de sortie courant d'une position en tenant compte du trailing et du break-even. */
+  effectiveStop(pos) {
+    const dir = pos.side === 'LONG' ? 1 : -1;
+    let slPct = pos.slPct;
+    if (this.cfg.trailingPct > 0 && pos.highestMovePct != null) {
+      // le trail ne remonte jamais en dessous du stop initial calculé ci-dessous
+      const trailStop = dir === 1
+        ? pos.entryPrice * (1 + (pos.highestMovePct - this.cfg.trailingPct) / 100)
+        : pos.entryPrice * (1 - (pos.highestMovePct + this.cfg.trailingPct) / 100);
+      const baseStop = pos.entryPrice * (1 - (dir * pos.slPct) / 100);
+      return Math.max(trailStop, baseStop);
+    }
+    if (this.cfg.breakEvenPct > 0 && pos.highestMovePct >= this.cfg.breakEvenPct && !pos.beApplied) {
+      slPct = 0; // on remonte le stop au prix d'entrée (+ petit coussin si breakEvenOffsetPct)
+      pos.beApplied = true;
+      const off = this.cfg.breakEvenOffsetPct || 0;
+      return pos.entryPrice * (1 + (dir * off) / 100);
+    }
+    if (pos.beApplied) {
+      const off = this.cfg.breakEvenOffsetPct || 0;
+      return pos.entryPrice * (1 + (dir * off) / 100);
+    }
+    return pos.entryPrice * (1 - (dir * slPct) / 100);
+  }
+
+  /** Sortie avec trailing/break-even : SL dynamique + TP fixe. */
+  checkExitDynamic(pos, closePrice) {
+    const dir = pos.side === 'LONG' ? 1 : -1;
+    const movePct = ((closePrice - pos.entryPrice) / pos.entryPrice) * 100 * dir;
+    pos.highestMovePct = Math.max(pos.highestMovePct ?? movePct, movePct);
+    const pTP = pos.entryPrice * (1 + (dir * pos.tpPct) / 100);
+    const pSL = this.effectiveStop(pos);
+    const hitSL = dir === 1 ? closePrice <= pSL : closePrice >= pSL;
+    const hitTP = dir === 1 ? closePrice >= pTP : closePrice <= pTP;
+    if (hitSL) return { kind: pos.beApplied || (pos.highestMovePct > pos.slPct) ? 'TRAIL' : 'SL', price: pSL };
+    if (hitTP) return { kind: 'TP', price: pTP };
+    return null;
+  }
+
   // ---------- dimensionnement ----------
 
   /**
@@ -117,12 +158,32 @@ class TradingEngine {
     if (!this.canOpen(symbol)) return null;
     if (!(price > 0)) return null;
 
-    const { margin, leverage, notional } = this.computePositionSize();
+    // ----- Filtre corrélation : exposition totale plafonnée -----
+    const maxExpo = (this.cfg.maxTotalExposurePct ?? 100) / 100 * this.capital;
+    let currentExpo = 0;
+    for (const p of this.positions.values()) currentExpo += p.notional;
+    const margin = this.capital * (this.cfg.riskPct / 100);
+    const leverage = Math.min(this.cfg.leverage, this.cfg.maxLeverage);
+    let notional = margin * leverage;
+    if (currentExpo + notional > maxExpo) {
+      if (this.cfg.tradingMode === 'real') {
+        this.log('WARN', `Entrée ${side} ${symbol} refusée : exposition totale (${((currentExpo + notional) / this.capital * 100).toFixed(0)}%) dépasse la limite (${this.cfg.maxTotalExposurePct}% du capital).`);
+        return null;
+      }
+      notional = Math.max(0, maxExpo - currentExpo);
+      if (!(notional > 0)) {
+        this.log('WARN', `Entrée ${side} ${symbol} ignorée : plafond d'exposition totale atteint (${this.cfg.maxTotalExposurePct}% du capital).`);
+        return null;
+      }
+      this.log('INFO', `Entrée ${side} ${symbol} réduite à ${notional.toFixed(2)}$ (plafond d'exposition totale ${this.cfg.maxTotalExposurePct}%).`);
+    }
     const qty = notional / price; // taille en unité du contrat
 
     const pos = {
       symbol,
       side,
+      highestMovePct: null,
+      beApplied: false,
       entryPrice: price,
       margin,
       leverage,
@@ -147,6 +208,13 @@ class TradingEngine {
       }
       if (res && res.entryPrice > 0) pos.entryPrice = res.entryPrice; // prix réel d'exécution
       pos.orderId = res ? res.id ?? null : null;
+    }
+
+    // ----- Mode observation (« watch ») : le signal est calculé, tracé et
+    // journalisé, mais AUCUNE position n'est enregistrée dans le carnet. ----
+    if (this.cfg.observeOnly) {
+      this.log('TRADE', `👁 OBSERVATION ${side} ${symbol} @ ${price.toFixed(4)} | var=${meta.changePct?.toFixed(3)}% RSI=${meta.rsi?.toFixed(1)} — aucun ordre envoyé (mode observation)`);
+      return null;
     }
 
     this.positions.set(symbol, pos);
@@ -200,6 +268,9 @@ class TradingEngine {
       durationMs: now - pos.openedAt,  // durée du trade (ms)
     };
     this.closedTrades.push(trade);
+    if (typeof this.cfg.onTradeClosed === 'function') {
+      try { this.cfg.onTradeClosed(trade); } catch { /* alerte jamais bloquante */ }
+    }
     if (this.closedTrades.length > 500) this.closedTrades.shift();
 
     const durStr = fmtDuration(trade.durationMs);
