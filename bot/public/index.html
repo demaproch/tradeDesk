@@ -199,6 +199,9 @@
   .reason-SL { background: rgba(251, 113, 133, 0.12); color: var(--red); }
   .reason-MANUAL { background: rgba(251, 191, 36, 0.12); color: var(--amber); }
   .empty { color: var(--muted); font-size: 12.5px; text-align: center; padding: 20px 0; }
+  /* Tableau Statistiques (sous le journal) */
+  .stat-label { color: var(--muted); font-weight: 600; }
+  .stat-val { text-align: right; font-weight: 700; }
   .scroll-y { max-height: 320px; overflow-y: auto; }
   .close-one {
     border: 1px solid rgba(251,113,133,.3); color: var(--red); background: transparent;
@@ -478,6 +481,23 @@
         <div class="card-head"><h2>🗒️ Journal</h2></div>
         <div class="card-body scroll-y" id="logBox" style="max-height:430px;padding-top:6px"><div class="empty">Vide</div></div>
       </section>
+
+      <section class="card">
+        <div class="card-head"><h2>📊 Statistiques</h2></div>
+        <div class="card-body" style="padding-top:4px">
+          <table aria-label="Statistiques du bot">
+            <tbody>
+              <tr><td class="stat-label">Trades</td><td class="mono stat-val" id="stTrades">—</td></tr>
+              <tr><td class="stat-label">Profit factor</td><td class="mono stat-val" id="stPf">—</td></tr>
+              <tr><td class="stat-label">Expectancy / trade</td><td class="mono stat-val" id="stExp">—</td></tr>
+              <tr><td class="stat-label">Max drawdown</td><td class="mono stat-val" id="stDd">—</td></tr>
+              <tr><td class="stat-label">Frais cumulés</td><td class="mono stat-val" id="stFees">—</td></tr>
+              <tr><td class="stat-label">Slippage estimé</td><td class="mono stat-val" id="stSlip">—</td></tr>
+              <tr><td class="stat-label">Mise à jour</td><td class="mono stat-val" id="stUpd">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </div>
 </main>
@@ -589,8 +609,37 @@ function renderAll() {
   updateUptime();
   document.getElementById('demoPill').style.display = STATE.demo ? '' : 'none';
 
-  renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); drawChart();
+  renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); renderStatsTable(); drawChart();
   renderSecurity();
+}
+
+// ==================== Tableau Statistiques (sous le journal) ====================
+function fmtPf(v) {
+  if (v == null || !isFinite(v)) return '∞';
+  return v.toFixed(2);
+}
+function renderStatsTable() {
+  const s = STATE.stats || {};
+  document.getElementById('stTrades').textContent = s.closedCount != null ? String(s.closedCount) : '—';
+  // Profit factor : ∞ si que des gains, — si aucun trade
+  const pfEl = document.getElementById('stPf');
+  if (!s.closedCount) { pfEl.textContent = '—'; pfEl.className = 'mono stat-val'; }
+  else {
+    pfEl.textContent = fmtPf(s.profitFactor);
+    pfEl.className = 'mono stat-val ' + ((s.profitFactor >= 1) ? 'pos' : 'neg');
+  }
+  const expEl = document.getElementById('stExp');
+  if (!s.closedCount) { expEl.textContent = '—'; expEl.className = 'mono stat-val'; }
+  else { expEl.textContent = money(s.expectancy || 0); expEl.className = 'mono stat-val ' + ((s.expectancy || 0) >= 0 ? 'pos' : 'neg'); }
+  const ddEl = document.getElementById('stDd');
+  if (!s.closedCount) { ddEl.textContent = '—'; ddEl.className = 'mono stat-val'; }
+  else {
+    ddEl.innerHTML = `−${fmtNum(s.maxDrawdownPct || 0)} % <span style="color:var(--muted)">(${usd(s.maxDrawdownUsd || 0)})</span>`;
+    ddEl.className = 'mono stat-val ' + ((s.maxDrawdownPct || 0) > 0 ? 'neg' : '');
+  }
+  document.getElementById('stFees').textContent = s.totalFees != null ? '−' + usd(s.totalFees) : '—';
+  document.getElementById('stSlip').textContent = s.slippageEstUsd != null ? '−' + usd(s.slippageEstUsd) : '—';
+  document.getElementById('stUpd').textContent = s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('fr-FR') : '—';
 }
 
 function currentParams() {

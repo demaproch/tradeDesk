@@ -289,20 +289,65 @@ class TradingEngine {
 
   // ---------- statistiques ----------
 
+  /**
+   * Drawdown maximal du capital réalisé (cash), reconstruit à partir des
+   * trades fermés triés par date de clôture. Retourne { pct, usd }.
+   */
+  maxDrawdown() {
+    const start = this.startEquity ?? this.cfg.initialCapital;
+    const sorted = [...this.closedTrades].sort((a, b) => a.closedAt - b.closedAt);
+    let peak = start, run = start, maxDdUsd = 0, maxDdPct = 0;
+    for (const tr of sorted) {
+      run += tr.pnl;
+      if (run > peak) peak = run;
+      const ddUsd = peak - run;
+      const ddPct = peak > 0 ? (ddUsd / peak) * 100 : 0;
+      if (ddUsd > maxDdUsd) { maxDdUsd = ddUsd; maxDdPct = ddPct; }
+    }
+    return { pct: maxDdPct, usd: maxDdUsd };
+  }
+
   stats() {
-    const wins = this.closedTrades.filter((t) => t.pnl > 0);
-    const losses = this.closedTrades.filter((t) => t.pnl <= 0);
-    const totalPnl = this.closedTrades.reduce((s, t) => s + t.pnl, 0);
-    const totalFees = this.closedTrades.reduce((s, t) => s + (t.fees || 0), 0);
+    const trades = this.closedTrades;
+    const wins = trades.filter((t) => t.pnl > 0);
+    const losses = trades.filter((t) => t.pnl <= 0);
+    const totalPnl = trades.reduce((s, t) => s + t.pnl, 0);
+    const totalFees = trades.reduce((s, t) => s + (t.fees || 0), 0);
+    // Profit factor : gains bruts / pertes brutes (avec frais, sur le PnL net).
+    const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? Infinity : 0);
+    // Expectancy : PnL moyen par trade clôturé.
+    const expectancy = trades.length ? totalPnl / trades.length : 0;
+    // Slippage estimé : en paper, les TP/SL sont exécutés au niveau exact et
+    // l'entrée à la clôture dure de la bougie → slippage nul par construction.
+    // En mode réel, on estime |prix d'exécution - prix du signal| × qty :
+    // entrée (meta.refPrice si fourni) et sortie (meta.exitRefPrice).
+    let estSlippage = 0;
+    for (const t of trades) {
+      if (typeof t.slippageUsd === 'number') { estSlippage += t.slippageUsd; continue; }
+      const qty = t.margin && t.leverage ? (t.margin * t.leverage) / t.entryPrice : 0;
+      if (qty > 0) {
+        if (t.meta && typeof t.meta.refPrice === 'number') estSlippage += Math.abs(t.entryPrice - t.meta.refPrice) * qty;
+        if (t.meta && typeof t.meta.exitRefPrice === 'number') estSlippage += Math.abs(t.exitPrice - t.meta.exitRefPrice) * qty;
+      }
+    }
+    const dd = this.maxDrawdown();
     return {
       capital: this.capital,
       openPositions: this.positions.size,
-      closedCount: this.closedTrades.length,
-      winRate: this.closedTrades.length ? (wins.length / this.closedTrades.length) * 100 : 0,
+      closedCount: trades.length,
+      winRate: trades.length ? (wins.length / trades.length) * 100 : 0,
       wins: wins.length,
       losses: losses.length,
       totalPnl,
       totalFees,
+      profitFactor,          // Infinity si aucun trade perdant
+      expectancy,            // $ / trade
+      maxDrawdownPct: dd.pct,
+      maxDrawdownUsd: dd.usd,
+      slippageEstUsd: estSlippage,
+      updatedAt: Date.now(), // dernière mise à jour des stats
     };
   }
 
