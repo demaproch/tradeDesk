@@ -482,14 +482,18 @@
         <div class="card-body scroll-y" id="logBox" style="max-height:430px;padding-top:6px"><div class="empty">Vide</div></div>
       </section>
 
-      <section class="card">
-        <div class="card-head"><h2>📊 Statistiques</h2></div>
-        <div class="card-body" style="padding-top:4px">
+      <section class="card" id="statsCard">
+        <div class="card-head clickable" onclick="toggleStats(event)" title="Cliquer pour replier / déplier">
+          <h2>📊 Statistiques <span class="chev"></span></h2>
+          <span style="font-size:10.5px;color:var(--muted)">sur trades clôturés</span>
+        </div>
+        <div class="params-summary" id="statsSummary"></div>
+        <div class="card-body settings-body" style="padding-top:4px">
           <table aria-label="Statistiques du bot">
             <tbody>
               <tr><td class="stat-label">Trades</td><td class="mono stat-val" id="stTrades">—</td></tr>
               <tr><td class="stat-label">Profit factor</td><td class="mono stat-val" id="stPf">—</td></tr>
-              <tr><td class="stat-label">Expectancy / trade</td><td class="mono stat-val" id="stExp">—</td></tr>
+              <tr><td class="mono stat-label">Expectancy / trade</td><td class="mono stat-val" id="stExp">—</td></tr>
               <tr><td class="stat-label">Max drawdown</td><td class="mono stat-val" id="stDd">—</td></tr>
               <tr><td class="stat-label">Frais cumulés</td><td class="mono stat-val" id="stFees">—</td></tr>
               <tr><td class="stat-label">Slippage estimé</td><td class="mono stat-val" id="stSlip">—</td></tr>
@@ -609,7 +613,7 @@ function renderAll() {
   updateUptime();
   document.getElementById('demoPill').style.display = STATE.demo ? '' : 'none';
 
-  renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); renderStatsTable(); drawChart();
+  renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); renderStatsTable(); updateStatsSummary(); drawChart();
   renderSecurity();
 }
 
@@ -961,6 +965,39 @@ function updateKeysSummary() {
   if (!keys.configured) chips.push('<span class="chip">Aucune clé</span>');
   else if (keys.unlocked) chips.push(`<span class="chip">🔓 Coffre déverrouillé · <b>${keys.keyId}</b></span>`);
   else chips.push(`<span class="chip">🔒 Coffre verrouillé · <b>${keys.keyId}</b></span>`);
+  el.innerHTML = chips.join('');
+}
+
+// ==================== Panneau Statistiques repliable ====================
+const STATS_COLLAPSE_KEY = 'statsCardCollapsed';
+
+function toggleStats(e) {
+  if (e && e.target.closest('button, a, input, select')) return;
+  const card = document.getElementById('statsCard');
+  const collapsed = !card.classList.contains('collapsed');
+  card.classList.toggle('collapsed', collapsed);
+  try { localStorage.setItem(STATS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
+  updateStatsSummary();
+}
+
+// Résumé affiché quand le panneau est replié : l'essentiel en un coup d'œil
+function updateStatsSummary() {
+  const el = document.getElementById('statsSummary');
+  if (!el || !STATE || !STATE.stats) return;
+  const s = STATE.stats;
+  const chips = [];
+  chips.push(`<span class="chip">Trades <b>${s.closedCount ?? 0}</b></span>`);
+  if (s.closedCount > 0) {
+    const pf = s.profitFactor;
+    const pfTxt = (pf == null || !isFinite(pf)) ? '∞' : fmtPf(pf);
+    chips.push(`<span class="chip">PF <b style="color:${pf >= 1 ? 'var(--green)' : 'var(--red)'}">${pfTxt}</b></span>`);
+    chips.push(`<span class="chip">Exp/trade <b style="color:${s.expectancy >= 0 ? 'var(--green)' : 'var(--red)'}">${money(s.expectancy || 0)}</b></span>`);
+    chips.push(`<span class="chip">Max DD <b class="neg">−${fmtNum(s.maxDrawdownPct || 0)} %</b></span>`);
+    chips.push(`<span class="chip">Frais <b>−${usd(s.totalFees || 0)}</b></span>`);
+  } else {
+    chips.push('<span class="chip">Aucun trade clôturé</span>');
+  }
+  chips.push(`<span class="chip">MAJ ${s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('fr-FR') : '—'}</span>`);
   el.innerHTML = chips.join('');
 }
 
@@ -1370,6 +1407,10 @@ try {
   }
   if (localStorage.getItem(KEYS_COLLAPSE_KEY) === '1') {
     document.getElementById('keysCard').classList.add('collapsed');
+  }
+  if (localStorage.getItem(STATS_COLLAPSE_KEY) !== '0') {
+    // replié par défaut (et mémorisé tel quel si l'utilisateur n'a rien changé)
+    document.getElementById('statsCard').classList.add('collapsed');
   }
 } catch (_) {}
 </script>
