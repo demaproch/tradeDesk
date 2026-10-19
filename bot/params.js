@@ -13,6 +13,7 @@ const PARAM_GROUPS = [
   { id: 'signal',     title: 'Signal d\'entrée', icon: '📡' },
   { id: 'money',      title: 'Money management', icon: '💰' },
   { id: 'exits',      title: 'Sorties TP / SL', icon: '🎯' },
+  { id: 'filters',    title: 'Filtres avancés', icon: '🧪' },
   { id: 'execution',  title: 'Exécution & cadence', icon: '⚙️' },
   { id: 'mode',       title: 'Mode de trading (paper / réel)', icon: '🔐' },
 ];
@@ -38,6 +39,14 @@ const PARAM_SCHEMA = {
   leverage:         { type: 'float', min: 1,            max: 12,         label: 'Levier', unit: 'x', step: 1, group: 'money', order: 'core', help: 'Plafonné à 12x (maxLeverage). Exposition = marge × levier.' },
   takeProfitPct:    { type: 'float', min: 0.05,         max: 100,        label: 'Take Profit', unit: '%', step: 0.1, group: 'exits', order: 'core', help: 'Fermeture automatique quand le mouvement du prix atteint +TP (dans le sens de la position).' },
   stopLossPct:      { type: 'float', min: 0.05,         max: 100,        label: 'Stop Loss', unit: '%', step: 0.1, group: 'exits', order: 'core', help: 'Fermeture automatique quand le mouvement du prix atteint −SL.' },
+  trailingPct:      { type: 'float', min: 0,            max: 50,         label: 'Trailing stop', unit: '%', step: 0.1, group: 'exits', order: 'core', help: '0 = désactivé. Le stop suit le meilleur mouvement atteint, à cette distance en retrait. Ne remonte jamais sous le SL initial.' },
+  breakEvenPct:     { type: 'float', min: 0,            max: 50,         label: 'Break-even dès', unit: '%', step: 0.1, group: 'exits', order: 'core', help: '0 = désactivé. Dès que le gain a atteint ce %, le stop est remonté au prix d\'entrée (plus de perte possible hors frais).' },
+  emaTrendFilter:   { type: 'int',   min: 0,            max: 400,        label: 'Filtre tendance EMA', unit: '', step: 5, group: 'filters', order: 'core', help: '0 = désactivé. LONG autorisé seulement si clôture > EMA(N) du timeframe supérieur ; SHORT seulement si < EMA(N).' },
+  trendTimeframe:   { type: 'enum', values: ['15m', '30m', '1h', '4h'], label: 'TF filtre tendance', group: 'filters', order: 'core', help: 'Timeframe sur lequel l\'EMA de filtrage est calculée (multi-timeframe).' },
+  maxTotalExposurePct: { type: 'float', min: 20,        max: 1000,       label: 'Exposition totale max', unit: '%', step: 10, group: 'filters', order: 'core', help: 'Plafond de notionnel cumulé toutes positions (% du capital). Limite la surexposition corrélée (BTC+ETH+SOL montent et baissent ensemble).' },
+  tradingHoursUTC:  { type: 'string', pattern: /^$|^\d{1,2}-\d{1,2}$/, label: 'Heures de trade (UTC)', group: 'filters', order: 'advanced', help: 'Vide = toujours. Ex. \"13-21\" : ouvre des trades uniquement entre 13 h et 21 h UTC. Les sorties TP/SL restent actives 24/7.' },
+  observeOnly:      { type: 'bool', label: 'Mode observation', group: 'mode', order: 'core', help: 'Le bot calcule et journalise les signaux sans JAMAIS ouvrir de position (paper ni réel). Idéal pour valider une config avant de trader.' },
+  useExchangeStops: { type: 'bool', label: 'Stops côté exchange', group: 'mode', order: 'core', help: 'Mode réel : place de vrais ordres STOP_MARKET / TAKE_PROFIT_MARKET sur l\'exchange. La position reste protégée même si le bot ou le PC meurt.' },
   cycleMs:          { type: 'int',   min: 5_000,        max: 600_000,    label: 'Intervalle du cycle', unit: 'ms', step: 1000, group: 'execution', order: 'advanced', help: 'Fréquence d\'analyse des paires.' },
   cooldownMs:       { type: 'int',   min: 0,            max: 24 * 3600_000, label: 'Cooldown', unit: 'ms', step: 30_000, group: 'execution', order: 'advanced', help: 'Délai minimum entre deux trades sur un même symbole.' },
   feePct:           { type: 'float', min: 0,            max: 1,           label: 'Frais par jambe', unit: '%', step: 0.01, group: 'execution', order: 'core', help: 'Frais taker estimés appliqués à l\'entrée ET à la sortie de chaque trade (0 = ignore les frais).' },
@@ -109,6 +118,12 @@ function checkCoherence(cfg) {
   if (cfg.timeframe === '1m' && cfg.cycleMs < 20_000) {
     return 'En timeframe 1m, le cycle ne peut pas être inférieur à 20 000 ms (les bougies se forment chaque minute).';
   }
+  if (cfg.trailingPct > 0 && cfg.trailingPct >= cfg.takeProfitPct) {
+    return `Trailing stop (${cfg.trailingPct}%) invalide : doit être strictement inférieur au Take Profit (${cfg.takeProfitPct}%), sinon le TP ne serait jamais atteignable.`;
+  }
+  if (cfg.breakEvenPct > 0 && cfg.breakEvenPct >= cfg.takeProfitPct) {
+    return `Break-even dès ${cfg.breakEvenPct}% invalide : doit être inférieur au Take Profit (${cfg.takeProfitPct}%).`;
+  }
   // Mode réel : garde-fous renforcés (levier et risque plafonnés)
   const maxLev = cfg.tradingMode === 'real' ? MAX_LEVERAGE_REAL : MAX_LEVERAGE_PAPER;
   if (cfg.leverage > maxLev) {
@@ -146,6 +161,24 @@ function validatePatch(patch, currentCfg) {
         continue;
       }
       changes[key] = raw;
+      continue;
+    }
+
+    if (spec.type === 'bool') {
+      const b = raw === true || raw === 'true' || raw === 1 || raw === '1';
+      const nb = raw === false || raw === 'false' || raw === 0 || raw === '0';
+      if (!b && !nb) { errors.push(`${spec.label || key} : valeur booléenne attendue`); continue; }
+      changes[key] = b;
+      continue;
+    }
+
+    if (spec.type === 'string') {
+      const s = String(raw).trim();
+      if (spec.pattern && !spec.pattern.test(s)) {
+        errors.push(`${spec.label || key} : format invalide (ex. « 13-21 » ou vide)`);
+        continue;
+      }
+      changes[key] = s;
       continue;
     }
 

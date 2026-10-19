@@ -31,6 +31,9 @@ const { TF_MS, closedCandles, aggregate } = require('./candles');
 const { PARAM_SCHEMA, PARAM_GROUPS, TIMEFRAMES, validatePatch, editableKeys, symbolUniverse, perpSymbol, validateSymbolOnExchange, MAX_LEVERAGE_PAPER, MAX_LEVERAGE_REAL } = require('./params');
 const { AuthManager } = require('./auth');
 const { SecretStore } = require('./secrets');
+const { AlertManager } = require('./alerts');
+const { StateStore } = require('./state');
+const { entrySignal } = require('./strategy');
 
 // Persistance des paramètres modifiés via le dashboard (survivants aux redémarrages)
 const PARAMS_FILE = path.join(__dirname, 'params.overrides.json');
@@ -142,12 +145,7 @@ class MarketData {
       return st.candles.slice(-this.cfg.candlesLimit);
     }
     const baseTf = this.baseTimeframe();
-    const ohlcv = await this.exchange.fetchOHLCV(
-      symbol,
-      baseTf,
-      undefined,
-      this.cfg.candlesLimit
-    );
+    const ohlcv = await this._fetchWithRetry(symbol, baseTf, this.cfg.candlesLimit);
     let candles = ohlcv.map((c) => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] }));
     // agrège si nécessaire (ex. 1m -> 3m) ; sinon retire la bougie en cours de formation
     if (baseTf !== this.cfg.timeframe) {
@@ -155,6 +153,34 @@ class MarketData {
     } else {
       candles = closedCandles(candles);
     }
+    return candles;
+  }
+
+  /** Récupération robuste : jusqu'à 3 tentatives avec backoff exponentiel (ccxt gère déjà le rate-limit). */
+  async _fetchWithRetry(symbol, tf, limit) {
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await this.exchange.fetchOHLCV(symbol, tf, undefined, limit);
+      } catch (e) {
+        lastErr = e;
+        const wait = 500 * Math.pow(2, attempt); // 0.5s, 1s, 2s
+        if (attempt < 2) await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    throw lastErr;
+  }
+
+  /** Bougies closes d'un AUTRE timeframe (filtre de tendance multi-timeframe). */
+  async fetchCandlesTF(symbol, tf, limit) {
+    if (DEMO) {
+      const st = this.demoState.get(symbol);
+      if (!st) return [];
+      return st.candles.slice(-limit);
+    }
+    const ohlcv = await this._fetchWithRetry(symbol, tf === '3m' ? '1m' : tf, limit);
+    let candles = ohlcv.map((c) => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] }));
+    candles = tf === '3m' ? aggregate(candles, TF_MS['1m'], TF_MS['3m']) : closedCandles(candles);
     return candles;
   }
 }
@@ -227,6 +253,52 @@ class LiveBroker {
     return Math.floor(qty / f) * f;
   }
 
+  /** Annule tout ordre conditionnel en suspens sur le symbole (avant clôture manuelle). */
+  async cancelConditionalOrders(symbol) {
+    if (!this.exchange) return;
+    try {
+      const open = await this.exchange.fetchOpenOrders(symbol);
+      for (const o of open) {
+        const t = String(o.type || '');
+        if (/STOP|TAKE_PROFIT/i.test(t)) {
+          await this.exchange.cancelOrder(o.id, symbol);
+          this.engine.log('INFO', `🧹 Ordres conditionnels annulés sur ${symbol} (${t}).`);
+        }
+      }
+    } catch (e) {
+      this.engine.log('WARN', `Annulation des ordres conditionnels impossible sur ${symbol} : ${e.message}`);
+    }
+  }
+
+  /** Place STOP_MARKET + TAKE_PROFIT_MARKET réels (position protégée même si le bot meurt). */
+  async placeConditionalStops({ symbol, side, qty, entryPrice, tpPct, slPct }) {
+    if (!this.exchange) throw new Error('Exchange non connecté.');
+    const dir = side === 'LONG' ? 1 : -1;
+    const pSL = entryPrice * (1 - (dir * slPct) / 100);
+    const pTP = entryPrice * (1 + (dir * tpPct) / 100);
+    const amount = this.amountToPrecision(symbol, qty);
+    const closeSide = side === 'LONG' ? 'sell' : 'buy';
+    const base = { reduceOnly: true, params: {} };
+    const slType = this.cfg.marketType === 'future' ? 'stop_market' : 'stop';
+    const tpType = this.cfg.marketType === 'future' ? 'take_profit_market' : 'take_profit';
+    const oSL = await this.exchange.createOrder(symbol, slType, closeSide, amount, pSL, { ...base.params, stopPrice: pSL, triggerPrice: pSL, reduceOnly: true });
+    const oTP = await this.exchange.createOrder(symbol, tpType, closeSide, amount, pTP, { ...base.params, stopPrice: pTP, triggerPrice: pTP, reduceOnly: true });
+    this._stops = this._stops || new Map();
+    this._stops.set(symbol, [oSL.id, oTP.id]);
+    this.engine.log('TRADE', `🛡 Stops EXCHANGE posés sur ${symbol} : SL @ ${pSL.toFixed(4)} (id=${oSL.id}), TP @ ${pTP.toFixed(4)} (id=${oTP.id})`);
+    return { slId: oSL.id, tpId: oTP.id };
+  }
+
+  /** Au redémarrage : retrouve les positions réelles ouvertes sur l'exchange. */
+  async fetchRealPositions() {
+    if (!this.exchange) return [];
+    if (typeof this.exchange.fetchPositions === 'function') {
+      const ps = await this.exchange.fetchPositions();
+      return ps.filter((p) => Math.abs(parseFloat(p.contractSize ?? p.info?.positionAmt ?? 0) || 0) > 0);
+    }
+    return [];
+  }
+
   /** Entrée : MARKET dans le sens de la position, après réglage du levier. */
   async placeEntry({ symbol, side, qty, leverage }) {
     if (!this.exchange) throw new Error('Exchange non connecté.');
@@ -242,8 +314,9 @@ class LiveBroker {
     if (!(amount > 0)) throw new Error(`Quantité arrondie à 0 sur ${symbol} (trop petite pour le pas de lot).`);
     const order = await this.exchange.createOrder(symbol, 'market', ccySide, amount);
     const fill = order.average || (order.info && (parseFloat(order.info.avgPrice) || parseFloat(order.info.ap))) || 0;
-    this.engine.log('TRADE', `🔴 ORDRE RÉEL exécuté : ${side} ${symbol} qty=${amount} @ ~${fill ? fill.toFixed(4) : 'n/d'} (id=${order.id})`);
-    return { id: order.id, entryPrice: fill > 0 ? fill : undefined };
+    const slip = fill > 0 ? Math.abs(fill - price) * qty : 0;
+    this.engine.log('TRADE', `🔴 ORDRE RÉEL exécuté : ${side} ${symbol} qty=${amount} @ ~${fill ? fill.toFixed(4) : 'n/d'} (id=${order.id})${slip > 0 ? ` | slippage ≈ ${slip.toFixed(2)}$` : ''}`);
+    return { id: order.id, entryPrice: fill > 0 ? fill : undefined, slippageUsd: slip };
   }
 
   /** Sortie : MARKET opposé + reduceOnly (ne peut jamais retourner la position). */
@@ -272,13 +345,20 @@ class LiveBroker {
 // ---------- Stratégie ----------
 
 class MomentumBot {
-  constructor(cfg, engine, market) {
+  constructor(cfg, engine, market, deps = {}) {
     this.cfg = cfg;
     this.engine = engine;
     this.market = market;
+    this.alerts = deps.alerts || null;     // AlertManager (optionnel)
+    this.store = deps.store || null;       // StateStore (optionnel)
+    this.broker = deps.broker || null;     // LiveBroker (optionnel)
+    this._ddAlerted = false;               // anti-spam alerte drawdown
     this.timer = null;
     this.running = false;
     this.paused = false;     // pause via le dashboard (le timer tourne, les cycles sont ignorés)
+    this.startedAt = null;   // horodatage du dernier démarrage (uptime)
+    this.pausedMs = 0;       // temps cumulé en pause depuis le démarrage (uptime effectif)
+    this._pausedSince = null;
     this.prices = {};        // symbol -> dernier prix de CLÔTURE connue (mark-to-market)
     this.signals = {};       // symbol -> dernière lecture d'indicateurs (dashboard)
     this.lastCandleTime = new Map(); // symbol -> timestamp de la dernière bougie close traitée
@@ -301,6 +381,9 @@ class MomentumBot {
     this.resetEquitySeries();
     this.running = true;
     this.paused = false;
+    this.startedAt = Date.now();
+    this.pausedMs = 0;
+    this._pausedSince = null;
     this.engine.log('INFO', `Bot démarré | timeframe=${this.cfg.timeframe} | cycle=${this.cfg.cycleMs / 1000}s | capital=${this.engine.capital.toFixed(2)}$ | frais=${this.cfg.feePct}%/jambe`);
     this.runCycle(); // premier cycle immédiat
     this.restartTimer();
@@ -311,14 +394,32 @@ class MomentumBot {
     this.paused = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.startedAt = null;
+    this.pausedMs = 0;
+    this._pausedSince = null;
     this.engine.log('INFO', 'Bot arrêté.');
     this.onChange();
   }
 
   setPaused(p) {
+    if (p === this.paused) return; // évite de fausser le compteur sur un doublon
     this.paused = p;
+    if (p) {
+      this._pausedSince = Date.now();
+    } else if (this._pausedSince) {
+      this.pausedMs += Date.now() - this._pausedSince;
+      this._pausedSince = null;
+    }
     this.engine.log('INFO', p ? '⏸ Bot en pause.' : '▶ Bot repris.');
     this.onChange();
+  }
+
+  /** Uptime depuis le dernier démarrage (ms). En pause, on soustrait le temps passé en pause. */
+  uptimeMs(now = Date.now()) {
+    if (!this.running || !this.startedAt) return 0;
+    let pausedTotal = this.pausedMs;
+    if (this._pausedSince) pausedTotal += now - this._pausedSince;
+    return Math.max(0, now - this.startedAt - pausedTotal);
   }
 
   restartTimer() {
@@ -405,9 +506,20 @@ class MomentumBot {
     if (applied.ok && 'initialCapital' in res.changes && this.cfg.tradingMode !== 'real') {
       this.engine.resetBook(this.cfg.initialCapital);
       this.lastCandleTime.clear();
+      this.clearPersistedState(); // ne pas ressusciter un ancien carnet au prochain démarrage
       this.engine.log('INFO', `📓 Carnet paper réinitialisé : capital=${this.cfg.initialCapital}$ (historique effacé).`);
     }
     return applied;
+  }
+
+  /** Vide aussi la persistance disque quand on réinitialise le carnet paper. */
+  clearPersistedState() {
+    if (!this.store) return;
+    try {
+      for (const f of [this.store.file, this.store.bakFile]) {
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+      }
+    } catch { /* fichier absent : rien à faire */ }
   }
 
   async resetParams(broker = null) {
@@ -436,8 +548,12 @@ class MomentumBot {
         this.engine.equityHistory.push({ t: Date.now(), equity: eq });
       }
       this.onChange();
+      if (typeof this.afterCycle === 'function') this.afterCycle();
     } catch (e) {
       this.engine.log('ERROR', `Erreur de cycle : ${e.message}`);
+      if (this.cfg.alertOnError && this.alerts && this.alerts.enabled) {
+        this.alerts.notify('cycle-error', '❌ momBot — Erreur de cycle', e.message).catch(() => {});
+      }
     }
   }
 
@@ -446,6 +562,9 @@ class MomentumBot {
     const pos = this.engine.positions.get(symbol);
     if (!pos) return null;
     const price = this.prices[symbol] ?? pos.entryPrice;
+    if (this.broker && this.broker.active && this.cfg.useExchangeStops) {
+      await this.broker.cancelConditionalOrders(symbol).catch(() => {});
+    }
     const trade = await this.engine.closePosition(symbol, price, 'MANUAL');
     this.engine.recordEquity(this.prices);
     return trade;
@@ -473,11 +592,22 @@ class MomentumBot {
     // ----- 1) Gestion de sortie prioritaire : TP / SL sur la clôture -----
     const pos = this.engine.positions.get(symbol);
     if (pos) {
-      const exit = this.engine.checkExit(pos, closePrice);
+      const dynamic = this.cfg.trailingPct > 0 || this.cfg.breakEvenPct > 0;
+      const exit = dynamic ? this.engine.checkExitDynamic(pos, closePrice) : this.engine.checkExit(pos, closePrice);
       if (exit) {
         // exécuté AU PRIX EXACT du TP/SL (comme un ordre conditionnel réel),
         // pas à la clôture qui peut avoir slippé plus loin
+        if (this.broker && this.broker.active && this.cfg.useExchangeStops) {
+          await this.broker.cancelConditionalOrders(symbol).catch(() => {});
+        }
         await this.engine.closePosition(symbol, exit.price, exit.kind);
+      } else if (this.broker && this.broker.active && this.cfg.useExchangeStops && (this.cfg.trailingPct > 0 || this.cfg.breakEvenPct > 0)) {
+        // trailing actif en mode réel : on remonte le stop exchange au nouveau niveau
+        const newStop = this.engine.effectiveStop(pos);
+        try {
+          await this.broker.cancelConditionalOrders(symbol);
+          await this.broker.placeConditionalStops({ symbol, side: pos.side, qty: pos.qty, entryPrice: pos.entryPrice, tpPct: pos.tpPct, slPct: ((pos.entryPrice - newStop) / pos.entryPrice) * 100 * (pos.side === 'LONG' ? 1 : -1) });
+        } catch (e) { this.engine.log('WARN', `Update stop exchange ${symbol} échoué : ${e.message}`); }
       }
     }
 
@@ -496,15 +626,52 @@ class MomentumBot {
     if (changePct == null || r == null) return;
     if (this.engine.positions.has(symbol)) return; // déjà une position sur ce symbole
     if (!this.engine.canOpen(symbol)) return;      // cooldown en cours
+    if (!this.inTradingWindow()) return;           // hors heures de trade autorisées (les sorties restent actives)
 
-    const longSignal = changePct > this.cfg.minMovePct && r > this.cfg.rsiLongMin;
-    const shortSignal = changePct < -this.cfg.minMovePct && r < this.cfg.rsiShortMax;
+    const sig = entrySignal(candles, this.cfg);
+    if (!sig) return;
 
-    if (longSignal) {
-      await this.engine.openPosition(symbol, 'LONG', closePrice, { changePct, rsi: r });
-    } else if (shortSignal) {
-      await this.engine.openPosition(symbol, 'SHORT', closePrice, { changePct, rsi: r });
+    // ----- Filtre de tendance multi-timeframe (EMA longue) -----
+    if (this.cfg.emaTrendFilter > 0) {
+      const trendOk = await this.trendAllowed(symbol, sig.side);
+      if (!trendOk) {
+        this.signals[symbol] = { ...this.signals[symbol], filtered: `${sig.side} ignoré (tendance EMA${this.cfg.emaTrendFilter}@${this.cfg.trendTimeframe})` };
+        return;
+      }
     }
+
+    await this.engine.openPosition(symbol, sig.side, closePrice, { changePct, rsi: r });
+    // stops côté exchange dès l'ouverture (mode réel)
+    if (this.cfg.tradingMode === 'real' && this.cfg.useExchangeStops && this.broker && this.broker.active && this.engine.positions.has(symbol)) {
+      const p = this.engine.positions.get(symbol);
+      try { await this.broker.placeConditionalStops({ symbol, side: p.side, qty: p.qty, entryPrice: p.entryPrice, tpPct: p.tpPct, slPct: p.slPct }); }
+      catch (e) { this.engine.log('ERROR', `⚠️ Impossible de poser les stops exchange sur ${symbol} : ${e.message}. Le bot continue de surveiller TP/SL lui-même.`); }
+    }
+  }
+
+  /** Fenêtre horaire UTC ("13-21") ; vide = toujours autorisé. Gère la plage minuit-minuit. */
+  inTradingWindow(now = new Date()) {
+    const spec = String(this.cfg.tradingHoursUTC || '').trim();
+    if (!spec) return true;
+    const m = /^(\d{1,2})-(\d{1,2})$/.exec(spec);
+    if (!m) return true;
+    const h = now.getUTCHours();
+    const a = Number(m[1]), b = Number(m[2]);
+    return a <= b ? (h >= a && h < b) : (h >= a || h < b); // plage chevauchant minuit
+  }
+
+  /** Vrai si la tendance EMA du timeframe supérieur autorise ce sens. */
+  async trendAllowed(symbol, side) {
+    try {
+      const need = this.cfg.emaTrendFilter + 5;
+      const tfCandles = await this.market.fetchCandlesTF(symbol, this.cfg.trendTimeframe, Math.max(need, 40));
+      if (tfCandles.length < this.cfg.emaTrendFilter + 1) return true; // pas assez de données : on ne bloque pas
+      const closes = tfCandles.map((c) => c.close);
+      const k = 2 / (this.cfg.emaTrendFilter + 1);
+      let ema = closes.slice(0, this.cfg.emaTrendFilter).reduce((s, v) => s + v, 0) / this.cfg.emaTrendFilter;
+      for (let i = this.cfg.emaTrendFilter; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+      return side === 'LONG' ? closes[closes.length - 1] > ema : closes[closes.length - 1] < ema;
+    } catch { return true; } // erreur réseau filtre : on laisse passer (le signal principal reste sain)
   }
 }
 
@@ -535,13 +702,58 @@ async function main() {
   const market = new MarketData(CONFIG);
   await market.init();
 
-  const bot = new MomentumBot(CONFIG, engine, market);
+  // ---------- Persistance du carnet (survit aux crashs/redémarrages) ----------
+  const store = new StateStore(path.join(__dirname, 'state.json'));
+  const restored = !DEMO ? store.load() : null;
+  if (restored) {
+    store.restore(engine, restored);
+    engine.log('INFO', `💾 Carnet restauré depuis state.json (capital=${engine.capital.toFixed(2)}$, ${engine.positions.size} position(s) ouverte(s), ${engine.closedTrades.length} trade(s) — sauvegardé le ${new Date(restored.savedAt).toLocaleString('fr-FR')}).`);
+  }
+
+  // ---------- Alertes push (Telegram / webhook) ----------
+  const alerts = new AlertManager();
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(__dirname, 'alerts.json'), 'utf8'));
+    alerts.configure(raw);
+    if (alerts.enabled) console.log('📲 Canal(aux) de notification(s) configuré(s).');
+  } catch { /* pas d'alerts.json : rien n'est envoyé */ }
+
+  const bot = new MomentumBot(CONFIG, engine, market, { alerts, store, broker: null });
   const broker = new LiveBroker(CONFIG, secrets, engine);
+  bot.broker = broker;
+
+  // hook fermeture de trade -> alerte + persistance immédiate
+  CONFIG.onTradeClosed = async (trade) => {
+    store.saveNow(engine);
+    if (CONFIG.alertOnClose && alerts.enabled) {
+      const pnlStr = `${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}$`;
+      alerts.notify(`close:${trade.symbol}:${trade.closedAt}`, `momBot — clôture ${trade.reason}`, `${trade.side} ${trade.symbol} | ${pnlStr} | capital=${engine.capital.toFixed(2)}$`).catch(() => {});
+    }
+  };
+  // hook drawdown vérifié à chaque cycle
+  bot.afterCycle = () => {
+    store.scheduleSave(engine);
+    if (CONFIG.alertDrawdownPct > 0 && alerts.enabled) {
+      const dd = engine.maxDrawdown().pct;
+      if (dd >= CONFIG.alertDrawdownPct && !bot._ddAlerted) {
+        bot._ddAlerted = true;
+        alerts.notify('drawdown', '⚠️ momBot — Drawdown élevé', `Drawdown max = ${dd.toFixed(1)}% (seuil ${CONFIG.alertDrawdownPct}%). Vérifie l'exposition.`).catch(() => {});
+      } else if (dd < CONFIG.alertDrawdownPct / 2) bot._ddAlerted = false;
+    }
+  };
 
   // Si le mode réel était déjà actif avant redémarrage : tentative de reconnexion
   if (CONFIG.tradingMode === 'real' && !DEMO) {
     if (secrets.unlocked) {
-      try { await broker.connect(); broker.attachHooks(); CONFIG.maxLeverage = MAX_LEVERAGE_REAL; engine.log('INFO', '🔴 Reconnexion au mode RÉEL (clés API restaurées).'); }
+      try {
+        await broker.connect(); broker.attachHooks(); CONFIG.maxLeverage = MAX_LEVERAGE_REAL;
+        engine.log('INFO', '🔴 Reconnexion au mode RÉEL (clés API restaurées).');
+        // stops exchange re-posés sur les positions restaurées (protection même si le bot est mort entre-temps)
+        for (const p of engine.positions.values()) {
+          try { await broker.placeConditionalStops({ symbol: p.symbol, side: p.side, qty: p.qty, entryPrice: p.entryPrice, tpPct: p.tpPct ?? CONFIG.takeProfitPct, slPct: p.slPct ?? CONFIG.stopLossPct }); }
+          catch (e) { engine.log('WARN', `Stop exchange non re-posé sur ${p.symbol} : ${e.message}`); }
+        }
+      }
       catch (e) { CONFIG.tradingMode = 'paper'; CONFIG.maxLeverage = MAX_LEVERAGE_PAPER; engine.log('WARN', `Mode réel impossible au démarrage (${e.message}) → repli en paper.`); }
     } else {
       CONFIG.tradingMode = 'paper'; CONFIG.maxLeverage = MAX_LEVERAGE_PAPER;
@@ -569,6 +781,9 @@ async function main() {
     signals: bot.signals,
     running: bot.running,
     paused: bot.paused,
+    startedAt: bot.startedAt,
+    uptimeMs: bot.uptimeMs(),
+    processUptimeMs: Math.round(process.uptime() * 1000), // uptime du processus serveur
     demo: DEMO,
     security: {
       tradingMode: CONFIG.tradingMode,
@@ -576,6 +791,8 @@ async function main() {
       keys: secrets.status(),
       maxLeverageReal: MAX_LEVERAGE_REAL,
     },
+    alerts: alerts.status(),
+    observeOnly: !!CONFIG.observeOnly,
   });
 
   // API : état complet du bot
@@ -640,6 +857,34 @@ async function main() {
     const trade = await bot.closeManually(sym);
     bot.onChange();
     res.json({ ok: true, trade, state: statePayload() });
+  });
+
+  // API : export CSV de l'historique des trades fermés
+  app.get('/api/trades.csv', (_req, res) => {
+    const rows = [['symbol', 'side', 'openedAt', 'closedAt', 'entryPrice', 'exitPrice', 'reason', 'marginUsd', 'leverage', 'pnlGrossUsd', 'feesUsd', 'pnlNetUsd']];
+    for (const t of engine.closedTrades) {
+      rows.push([t.symbol, t.side, new Date(t.openedAt).toISOString(), new Date(t.closedAt).toISOString(), t.entryPrice, t.exitPrice, t.reason, (t.margin ?? '').toFixed ? t.margin.toFixed(4) : t.margin, t.leverage, t.grossPnl.toFixed(4), (t.fees ?? 0).toFixed(4), t.pnl.toFixed(4)]);
+    }
+    const csv = rows.map((r) => r.join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="mombot-trades-${Date.now()}.csv"`);
+    res.send(csv);
+  });
+
+  // ---------- Notifications push (Telegram / webhook) ----------
+  app.post('/api/alerts/config', (req, res) => {
+    const { telegramToken, telegramChatId, webhookUrl } = req.body || {};
+    alerts.configure({ telegramToken, telegramChatId, webhookUrl });
+    try { fs.writeFileSync(path.join(__dirname, 'alerts.json'), JSON.stringify(alerts.cfg)); }
+    catch (e) { return res.status(500).json({ error: `Enregistrement impossible : ${e.message}` }); }
+    engine.log('INFO', '📲 Configuration de notifications enregistrée.');
+    res.json({ ok: true, status: alerts.status(), state: statePayload() });
+  });
+
+  app.post('/api/alerts/test', async (_req, res) => {
+    if (!alerts.enabled) return res.status(400).json({ error: 'Aucun canal configuré (Telegram token+chat id ou webhook).' });
+    const r = await alerts.sendNow('✅ momBot — test de notification', `Capital=${engine.capital.toFixed(2)}$ | ${engine.positions.size} position(s) ouverte(s)`);
+    res.status(r.ok ? 200 : 502).json({ ok: r.ok, status: alerts.status(), state: statePayload() });
   });
 
   // ---------- Coffre à clés API (les secrets ne transitent JAMAIS en clair vers le client) ----------
@@ -712,6 +957,24 @@ async function main() {
   wss.on('connection', (ws, req) => {
     if (!auth.wsAuthenticate(req)) { ws.close(4401, 'Non authentifié'); return; }
     ws.send(JSON.stringify(statePayload()));
+  });
+
+  // Arrêt propre : sauvegarde immédiate du carnet (Ctrl+C / SIGTERM / stop serveur)
+  let shuttingDown = false;
+  function shutdown(sig) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try { bot.stop(); } catch { /* déjà arrêté */ }
+    try { store.saveNow(engine); } catch { /* déjà loggué */ }
+    console.log(`\n${sig} reçu — carnet sauvegardé (state.json). À bientôt !`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1500).unref();
+  }
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('uncaughtException', (e) => {
+    engine.log('ERROR', `⛔ Erreur inattendue (plutôt que crash silencieux) : ${e.message}`);
+    try { store.saveNow(engine); } catch { /* best effort */ }
   });
 
   server.listen(CONFIG.port, () => {

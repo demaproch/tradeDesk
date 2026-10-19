@@ -41,6 +41,28 @@ const CONFIG = {
   takeProfitPct: 2.8,             // TP : +2.8% de mouvement du prix
   stopLossPct: 1.0,               // SL : -1.0% de mouvement du prix
 
+  // --- Trailing stop & break-even (0 = désactivé, comportement d'origine) ---
+  trailingPct: 0,                 // ex. 1.5 : le stop suit le pic à -1.5% de recul max
+  breakEvenPct: 0,                // ex. 1.0 : à +1.0% de gain, stop remonté au prix d'entrée
+  breakEvenOffsetPct: 0,          // coussin au-dessus du prix d'entrée quand BE actif (%)
+
+  // --- Filtres avancés (désactivés par défaut = stratégie d'origine) ---
+  emaTrendFilter: 0,              // 0 = off ; N>0 : LONG seulement si clôture > EMA(N), SHORT < EMA(N)
+  trendTimeframe: '1h',           // timeframe du filtre de tendance (multi-timeframe)
+  maxTotalExposurePct: 300,       // plafond d'exposition notionnelle cumulée (% du capital) — gère la corrélation BTC/ETH/SOL…
+  tradingHoursUTC: '',            // ex. "13-21" : n'ouvrir des trades qu'entre ces heures UTC (vide = toujours)
+
+  // --- Mode observation (watch) : signaux calculés/journalisés, aucun ordre ---
+  observeOnly: false,
+
+  // --- Ordres conditionnels côté exchange (mode réel uniquement) ---
+  useExchangeStops: true,         // place STOP_MARKET/TAKE_PROFIT_MARKET réels en plus du polling bot
+
+  // --- Alertes push (Telegram / webhook) — configurables via le dashboard ---
+  alertOnClose: true,             // notifier chaque fermeture (TP/SL/MANUEL)
+  alertOnError: true,             // notifier erreurs réseau/refus d'ordre
+  alertDrawdownPct: 20,           // alerter si le drawdown dépasse ce % (0 = désactivé)
+
   // --- Règles supplémentaires ---
   cooldownMs: 5 * 60 * 1000,      // 5 minutes entre deux trades sur le même symbole
   maxOnePositionPerSymbol: true,  // une seule position à la fois par symbole

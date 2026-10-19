@@ -199,6 +199,9 @@
   .reason-SL { background: rgba(251, 113, 133, 0.12); color: var(--red); }
   .reason-MANUAL { background: rgba(251, 191, 36, 0.12); color: var(--amber); }
   .empty { color: var(--muted); font-size: 12.5px; text-align: center; padding: 20px 0; }
+  /* Tableau Statistiques (sous le journal) */
+  .stat-label { color: var(--muted); font-weight: 600; }
+  .stat-val { text-align: right; font-weight: 700; }
   .scroll-y { max-height: 320px; overflow-y: auto; }
   .close-one {
     border: 1px solid rgba(251,113,133,.3); color: var(--red); background: transparent;
@@ -252,6 +255,9 @@
   .field label { display: flex; justify-content: space-between; align-items: baseline; font-size: 10.5px; font-weight: 700; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.06em; }
   .field label .def { font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 10px; opacity: .8; }
   .input-wrap { position: relative; }
+  .field .switch-row { display: flex; align-items: center; gap: 8px; text-transform: none; font-size: 12.5px; color: var(--text); cursor: pointer; }
+  .field .switch-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .field input[type="text"] { width: 100%; background: var(--panel2, rgba(255,255,255,.03)); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; color: var(--text); font-size: 12.5px; font-family: inherit; }
   .field input[type="number"], .field select {
     width: 100%; padding: 9px 42px 9px 12px; border-radius: 9px;
     background: var(--panel); border: 1px solid var(--border);
@@ -264,7 +270,7 @@
     position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
     font: 700 11px 'JetBrains Mono'; color: var(--muted); pointer-events: none;
   }
-  .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.12); }
+  .field input:focus, .field select:focus, .field input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.12); }
   .field .hint { font-size: 10.5px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
   .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .save-msg { font-size: 12px; min-height: 16px; line-height: 1.4; }
@@ -272,7 +278,7 @@
   .dirty-badge { display:none; align-self:center; font-size: 11px; color: var(--amber); font-weight: 700; }
 
   /* Dirty (unsaved) fields */
-  .field input.dirty, .field select.dirty { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(251,191,36,.12); }
+  .field input.dirty, .field select.dirty, .field input[type="text"].dirty { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(251,191,36,.12); }
 
   /* Live preview of sizing / R/R */
   .preview { border: 1px dashed var(--border-strong); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; background: rgba(56,189,248,.03); }
@@ -329,6 +335,7 @@
       </div>
     </div>
     <div id="connPill" class="status-pill stopped"><span class="dot"></span><span id="connTxt">Connexion…</span></div>
+    <div id="uptimePill" class="status-pill" style="display:none" title="Uptime du bot depuis le dernier démarrage (le temps en pause est décompté)">⏱ <span id="uptimeTxt">—</span></div>
     <div id="modePill" class="status-pill" style="display:none" title="Mode de trading actuel"></div>
     <div id="demoPill" class="status-pill badge-demo" style="display:none">🧪 DÉMO</div>
     <button id="btnToggle" class="btn btn-primary" onclick="toggleBot()">▶ Démarrer</button>
@@ -422,6 +429,28 @@
         </div>
       </section>
 
+      <!-- Notifications push (Telegram / webhook) -->
+      <section class="card" id="alertsCard">
+        <div class="card-head clickable" onclick="toggleCard('alertsCardBody', this)" title="Cliquer pour replier / déplier">
+          <h2>📲 Notifications <span class="chev"></span></h2>
+          <span style="font-size:10.5px;color:var(--muted)" id="alertsChip">non configurées</span>
+        </div>
+        <div class="card-body" id="alertsCardBody" style="display:none">
+          <div class="field"><label>Token bot Telegram<span class="def">@BotFather</span></label>
+            <input type="text" id="inpTgToken" placeholder="123456:ABC-DEF…" autocomplete="off" /></div>
+          <div class="field"><label>Chat ID Telegram<span class="def">@userinfobot</span></label>
+            <input type="text" id="inpTgChat" placeholder="ex. 123456789" autocomplete="off" /></div>
+          <div class="field"><label>Webhook JSON (optionnel)</label>
+            <input type="text" id="inpHook" placeholder="https://…/hook — reçoit {source,text}" autocomplete="off" /></div>
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary" onclick="saveAlerts()">💾 Enregistrer</button>
+            <button type="button" class="btn" onclick="testAlerts()" id="btnTestAlerts">📨 Envoyer un test</button>
+          </div>
+          <div class="save-msg" id="alertsMsg"></div>
+          <div class="hint" style="margin-top:8px">Reçoit les clôtures de trades (TP/SL/MANUEL), les erreurs réseau et les alertes de drawdown.</div>
+        </div>
+      </section>
+
       <!-- Clés API & sécurité -->
       <section class="card" id="keysCard">
         <div class="card-head clickable" onclick="toggleKeys(event)" title="Cliquer pour replier / déplier">
@@ -476,6 +505,27 @@
       <section class="card">
         <div class="card-head"><h2>🗒️ Journal</h2></div>
         <div class="card-body scroll-y" id="logBox" style="max-height:430px;padding-top:6px"><div class="empty">Vide</div></div>
+      </section>
+
+      <section class="card" id="statsCard">
+        <div class="card-head clickable" onclick="toggleStats(event)" title="Cliquer pour replier / déplier">
+          <h2>📊 Statistiques <span class="chev"></span></h2>
+          <span style="font-size:10.5px;color:var(--muted)">sur trades clôturés</span>
+        </div>
+        <div class="params-summary" id="statsSummary"></div>
+        <div class="card-body settings-body" style="padding-top:4px">
+          <table aria-label="Statistiques du bot">
+            <tbody>
+              <tr><td class="stat-label">Trades</td><td class="mono stat-val" id="stTrades">—</td></tr>
+              <tr><td class="stat-label">Profit factor</td><td class="mono stat-val" id="stPf">—</td></tr>
+              <tr><td class="mono stat-label">Expectancy / trade</td><td class="mono stat-val" id="stExp">—</td></tr>
+              <tr><td class="stat-label">Max drawdown</td><td class="mono stat-val" id="stDd">—</td></tr>
+              <tr><td class="stat-label">Frais cumulés</td><td class="mono stat-val" id="stFees">—</td></tr>
+              <tr><td class="stat-label">Slippage estimé</td><td class="mono stat-val" id="stSlip">—</td></tr>
+              <tr><td class="stat-label">Mise à jour</td><td class="mono stat-val" id="stUpd">—</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   </div>
@@ -540,6 +590,8 @@ async function ensureSchema() {
 }
 
 function render() {
+  // Mémorise la base d'uptime à la réception (pour le faire défiler localement)
+  if (STATE && typeof STATE.uptimeMs === 'number') { _uptimeBase = STATE.uptimeMs; _uptimeLocalAt = Date.now(); }
   ensureSchema().then(renderAll);
 }
 
@@ -581,10 +633,42 @@ function renderAll() {
   bp.textContent = STATE.paused ? '▶ Reprendre' : '⏸ Pause';
   const conn = document.getElementById('connPill');
   conn.className = 'status-pill ' + (STATE.running ? (STATE.paused ? 'paused-state' : 'running') : 'stopped');
+  // uptime : base déjà mémorisée dans render(); masqué si bot arrêté, sinon rafraîchi ici
+  if (typeof STATE.uptimeMs === 'number') { _uptimeBase = STATE.uptimeMs; _uptimeLocalAt = Date.now(); }
+  updateUptime();
   document.getElementById('demoPill').style.display = STATE.demo ? '' : 'none';
 
-  renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); drawChart();
+  renderTimeframes(); renderSignals(); renderPositions(); renderTrades(); renderLogs(); renderStatsTable(); updateStatsSummary(); drawChart();
   renderSecurity();
+}
+
+// ==================== Tableau Statistiques (sous le journal) ====================
+function fmtPf(v) {
+  if (v == null || !isFinite(v)) return '∞';
+  return v.toFixed(2);
+}
+function renderStatsTable() {
+  const s = STATE.stats || {};
+  document.getElementById('stTrades').textContent = s.closedCount != null ? String(s.closedCount) : '—';
+  // Profit factor : ∞ si que des gains, — si aucun trade
+  const pfEl = document.getElementById('stPf');
+  if (!s.closedCount) { pfEl.textContent = '—'; pfEl.className = 'mono stat-val'; }
+  else {
+    pfEl.textContent = fmtPf(s.profitFactor);
+    pfEl.className = 'mono stat-val ' + ((s.profitFactor >= 1) ? 'pos' : 'neg');
+  }
+  const expEl = document.getElementById('stExp');
+  if (!s.closedCount) { expEl.textContent = '—'; expEl.className = 'mono stat-val'; }
+  else { expEl.textContent = money(s.expectancy || 0); expEl.className = 'mono stat-val ' + ((s.expectancy || 0) >= 0 ? 'pos' : 'neg'); }
+  const ddEl = document.getElementById('stDd');
+  if (!s.closedCount) { ddEl.textContent = '—'; ddEl.className = 'mono stat-val'; }
+  else {
+    ddEl.innerHTML = `−${fmtNum(s.maxDrawdownPct || 0)} % <span style="color:var(--muted)">(${usd(s.maxDrawdownUsd || 0)})</span>`;
+    ddEl.className = 'mono stat-val ' + ((s.maxDrawdownPct || 0) > 0 ? 'neg' : '');
+  }
+  document.getElementById('stFees').textContent = s.totalFees != null ? '−' + usd(s.totalFees) : '—';
+  document.getElementById('stSlip').textContent = s.slippageEstUsd != null ? '−' + usd(s.slippageEstUsd) : '—';
+  document.getElementById('stUpd').textContent = s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('fr-FR') : '—';
 }
 
 function currentParams() {
@@ -675,16 +759,35 @@ function fmtDuration(ms) {
   return h + ' h' + (rm ? ' ' + String(rm).padStart(2, '0') + ' min' : '');
 }
 
-// Tick "durée en direct" des positions ouvertes (re-render léger chaque seconde)
+// Tick "durée en direct" des positions ouvertes + uptime du bot (chaque seconde)
 setInterval(() => {
   const cells = document.querySelectorAll('.live-dur');
-  if (!cells.length) return;
-  const nowMs = Date.now();
-  cells.forEach((c) => {
-    const o = Number(c.dataset.opened);
-    if (o) c.textContent = fmtDuration(nowMs - o);
-  });
+  if (cells.length) {
+    const nowMs = Date.now();
+    cells.forEach((c) => {
+      const o = Number(c.dataset.opened);
+      if (o) c.textContent = fmtDuration(nowMs - o);
+    });
+  }
+  updateUptime();
 }, 1000);
+
+// Uptime : le serveur envoie uptimeMs à chaque événement WS ; on le fait défiler
+// localement entre deux réceptions pour un compteur fluide.
+let _uptimeBase = null;   // uptimeMs reçu du serveur
+let _uptimeLocalAt = 0;   // Date.now() à la réception
+function updateUptime() {
+  const pill = document.getElementById('uptimePill');
+  const txt = document.getElementById('uptimeTxt');
+  if (!pill || !txt) return;
+  if (!STATE || !STATE.running || _uptimeBase == null) {
+    pill.style.display = 'none';
+    return;
+  }
+  pill.style.display = '';
+  const live = _uptimeBase + (Date.now() - _uptimeLocalAt);
+  txt.textContent = fmtDuration(live) + (STATE.paused ? ' ⏸' : '');
+}
 
 function renderTrades() {
   const tb = document.getElementById('tradesBody');
@@ -890,6 +993,39 @@ function updateKeysSummary() {
   el.innerHTML = chips.join('');
 }
 
+// ==================== Panneau Statistiques repliable ====================
+const STATS_COLLAPSE_KEY = 'statsCardCollapsed';
+
+function toggleStats(e) {
+  if (e && e.target.closest('button, a, input, select')) return;
+  const card = document.getElementById('statsCard');
+  const collapsed = !card.classList.contains('collapsed');
+  card.classList.toggle('collapsed', collapsed);
+  try { localStorage.setItem(STATS_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch (_) {}
+  updateStatsSummary();
+}
+
+// Résumé affiché quand le panneau est replié : l'essentiel en un coup d'œil
+function updateStatsSummary() {
+  const el = document.getElementById('statsSummary');
+  if (!el || !STATE || !STATE.stats) return;
+  const s = STATE.stats;
+  const chips = [];
+  chips.push(`<span class="chip">Trades <b>${s.closedCount ?? 0}</b></span>`);
+  if (s.closedCount > 0) {
+    const pf = s.profitFactor;
+    const pfTxt = (pf == null || !isFinite(pf)) ? '∞' : fmtPf(pf);
+    chips.push(`<span class="chip">PF <b style="color:${pf >= 1 ? 'var(--green)' : 'var(--red)'}">${pfTxt}</b></span>`);
+    chips.push(`<span class="chip">Exp/trade <b style="color:${s.expectancy >= 0 ? 'var(--green)' : 'var(--red)'}">${money(s.expectancy || 0)}</b></span>`);
+    chips.push(`<span class="chip">Max DD <b class="neg">−${fmtNum(s.maxDrawdownPct || 0)} %</b></span>`);
+    chips.push(`<span class="chip">Frais <b>−${usd(s.totalFees || 0)}</b></span>`);
+  } else {
+    chips.push('<span class="chip">Aucun trade clôturé</span>');
+  }
+  chips.push(`<span class="chip">MAJ ${s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('fr-FR') : '—'}</span>`);
+  el.innerHTML = chips.join('');
+}
+
 // Résumé affiché quand le panneau est replié ; badge « non appliquées » si ébauche en cours
 function updateParamsSummary() {
   const el = document.getElementById('paramsSummary');
@@ -985,6 +1121,14 @@ function mkField(k) {
     div.innerHTML = `<label>${spec.label}</label>
       <select id="in_${k}" name="${k}">${spec.values.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
       <div class="hint">${spec.help || ''}</div>`;
+  } else if (spec.type === 'bool') {
+    div.innerHTML = `<label class="switch-row"><input type="checkbox" id="in_${k}" name="${k}" ${SCHEMA.params[k] ? 'checked' : ''} />
+        <span>${spec.label}</span></label>
+      <div class="hint">${spec.help || ''}</div>`;
+  } else if (spec.type === 'string') {
+    div.innerHTML = `<label>${spec.label}<span class="def">ex. « 13-21 » ou vide</span></label>
+      <input type="text" id="in_${k}" name="${k}" value="${SCHEMA.params[k] ?? ''}" placeholder="(vide = toujours)" />
+      <div class="hint">${spec.help || ''}</div>`;
   } else {
     const step = spec.step ?? (spec.type === 'int' ? 1 : 'any');
     div.innerHTML = `<label>${spec.label}<span class="def">défaut : ${humanize(k, SCHEMA.defaults[k])}</span></label>
@@ -1028,7 +1172,8 @@ function syncSettingsValues() {
     }
     const el = document.getElementById('in_' + k);
     if (!el || el === document.activeElement) continue; // ne pas écraser la saisie en cours
-    el.value = serverValue(k);
+    if (SCHEMA.spec[k] && SCHEMA.spec[k].type === 'bool') el.checked = !!serverValue(k);
+    else el.value = serverValue(k);
   }
 }
 
@@ -1040,8 +1185,11 @@ function serverValue(k) {
 }
 
 function inputValue(el, k) {
-  if (SCHEMA.spec[k].type === 'symbols') return symList();
-  if (SCHEMA.spec[k].type === 'enum') return el.value;
+  const t = SCHEMA.spec[k].type;
+  if (t === 'symbols') return symList();
+  if (t === 'enum') return el.value;
+  if (t === 'bool') return !!el.checked;
+  if (t === 'string') return el.value.trim();
   return el.value === '' ? NaN : Number(el.value);
 }
 
@@ -1202,6 +1350,55 @@ function renderSecurity() {
   document.getElementById('btnTestKeys').style.display = sec.realActive ? '' : 'none';
   document.getElementById('btnPaper').style.display = sec.tradingMode === 'real' ? '' : 'none';
   updateKeysSummary();
+  renderAlertsChip();
+}
+
+// ==================== Notifications push ====================
+let ALERTS_CFG_MEM = { tg: '', chat: '', hook: '' }; // ne pas repartir du client si on rouvre la carte
+
+function alertsStatus() { return STATE?.alerts || SCHEMA?.alerts || {}; }
+
+function renderAlertsChip() {
+  const st = alertsStatus();
+  const chip = document.getElementById('alertsChip');
+  if (!chip) return;
+  const parts = [];
+  if (st.telegramConfigured) parts.push('Telegram ✓');
+  if (st.webhookConfigured) parts.push('Webhook ✓');
+  chip.textContent = parts.length ? parts.join(' · ') : 'non configurées';
+  chip.style.color = parts.length ? '#6ee7a7' : 'var(--muted)';
+  const lr = st.lastResult;
+  if (lr && Date.now() - lr.at < 120000) {
+    const m = document.getElementById('alertsMsg');
+    if (m) { m.className = 'save-msg ' + (lr.ok ? 'ok' : 'err'); m.textContent = lr.ok ? `Dernier envoi : ${lr.summary}` : `Dernier envoi échoué : ${lr.summary}`; }
+  }
+}
+
+async function saveAlerts() {
+  const msg = document.getElementById('alertsMsg');
+  const body = {
+    telegramToken: document.getElementById('inpTgToken').value.trim(),
+    telegramChatId: document.getElementById('inpTgChat').value.trim(),
+    webhookUrl: document.getElementById('inpHook').value.trim(),
+  };
+  const res = await postJson('/api/alerts/config', body);
+  if (res.ok) {
+    msg.className = 'save-msg ok'; msg.textContent = '✅ Configuration enregistrée (locale au dashboard).';
+    ['inpTgToken', 'inpTgChat', 'inpHook'].forEach(id => document.getElementById(id).value = '');
+  } else {
+    msg.className = 'save-msg err'; msg.textContent = '❌ ' + (res.error || 'Échec');
+  }
+  renderAlertsChip();
+}
+
+async function testAlerts() {
+  const msg = document.getElementById('alertsMsg');
+  msg.className = 'save-msg'; msg.textContent = 'Envoi du test…';
+  const res = await postJson('/api/alerts/test', {});
+  const st = res.status?.lastResult || {};
+  msg.className = 'save-msg ' + (res.ok ? 'ok' : 'err');
+  msg.textContent = res.ok ? '✅ Test envoyé.' : `❌ ${st.summary || res.error || 'Échec de test'}`;
+  renderAlertsChip();
 }
 
 async function saveKeys() {
@@ -1296,6 +1493,10 @@ try {
   }
   if (localStorage.getItem(KEYS_COLLAPSE_KEY) === '1') {
     document.getElementById('keysCard').classList.add('collapsed');
+  }
+  if (localStorage.getItem(STATS_COLLAPSE_KEY) !== '0') {
+    // replié par défaut (et mémorisé tel quel si l'utilisateur n'a rien changé)
+    document.getElementById('statsCard').classList.add('collapsed');
   }
 } catch (_) {}
 </script>
