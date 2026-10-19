@@ -5,11 +5,13 @@ Bot de trading **momentum + RSI** sur les futures perpétuels Binance, avec dash
 > En une phrase : le bot détecte un mouvement de prix significatif sur les 10 dernières bougies **clôturées**, le confirme avec le RSI, entre dans le sens du mouvement avec 8 % de risque et un levier 10x, puis sort automatiquement à **+2,8 %** (TP) ou **−1,0 %** (SL).
 
 ### 📚 Documentation complète
+- **`PARAMETRES.md` — Guide des paramètres & fonctionnalités** : chaque paramètre expliqué (rôle, bornes, valeurs par défaut, comment le régler, interactions), toutes les fonctionnalités (dashboard, sécurité, alertes, backtest, persistance) + recettes de configuration. Voir aussi `STRATEGIE.md` et `PROMPT_SKILL.md` ci-dessous.
 
 | Document | Contenu |
 |---|---|
 | **[STRATEGIE.md](STRATEGIE.md)** | La stratégie et le fonctionnement du bot **de A à Z** : cycle de vie d'un tick, formules exactes (RSI Wilder, variation, sizing, TP/SL, frais, équité), money management, garde-fous, pièges corrigés, rôle de chaque fichier, annexe avec exemple de trade chiffré pas à pas. Indépendant du code — suffisant pour reconstruire le bot dans un autre langage. |
 | **[PROMPT_SKILL.md](PROMPT_SKILL.md)** | Prompt autonome prêt à coller dans une autre IA pour reproduire momBot : version complète (bot + dashboard + sécurité) et version minimale (cœur stratégie + tests), avec contraintes de qualité non négociables et conseils d'utilisation. |
+| **[PARAMETRES.md](PARAMETRES.md)** | **Guide des paramètres & fonctionnalités** : chaque paramètre un par un (rôle, défaut, bornes UI, comment le régler, interactions/contraintes de cohérence), toutes les fonctionnalités du dashboard, sécurité & coffre, alertes push, backtest CLI, persistance/crash-recovery, tableau récapitulatif complet et recettes de configuration (prudent, agressif, premier passage en réel…). |
 | README.md (ci-dessous) | Installation, démarrage rapide, sécurité, modes paper/réel, API, déploiement. |
 
 ---

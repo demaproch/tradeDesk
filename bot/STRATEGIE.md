@@ -356,18 +356,22 @@ de l'argent en simulation avant correction :
 ## 13. Paramètres modifiables via le dashboard
 
 Panneau repliable « ⚙️ Paramètres du bot » — les champs sont générés depuis un schéma serveur,
-validés côté serveur (bornes, entiers, cohérences croisées : RSI short < RSI long, cycle ≥ 20 s…)
-puis persistés (`params.overrides.json`) et appliqués **à chaud** :
+validés côté serveur (bornes, entiers, cohérences croisées : RSI short < RSI long, cycle ≥ 20 s…
+trailing < TP, levier ≤ 5× en réel…), puis persistés (`params.overrides.json`) et appliqués **à chaud** :
 
 - 🪙 Marché & paires : cases à cocher (15 perps) + champ paire libre.
 - 📡 Signal : variation min (%) , seuils RSI LONG/SHORT ; avancés : nb de bougies, période RSI.
-- 💰 Money : risque (%), levier (×).
-- 🎯 Sorties : Take Profit (%), Stop Loss (%).
-- ⚙️ Exécution : timeframe, durée de cycle, cooldown.
-- 🔐 Mode : paper/réel, clés API (panneau occultable séparé).
+- 💰 Money : risque (%), levier (×), capital simulé.
+- 🎯 Sorties : Take Profit (%), Stop Loss (%), trailing stop, break-even.
+- 🧪 Filtres : EMA tendance multi-timeframe, exposition totale max, heures de trade UTC.
+- ⚙️ Exécution : timeframe, durée de cycle, cooldown, frais par jambe.
+- 🔐 Mode : paper/réel, mode observation, stops côté exchange, clés API (panneau occultable séparé).
 
 Un aperçu live calcule marge/exposition/gain TP/perte SL selon les valeurs en cours d'édition.
 « ↺ Défauts » restaure la configuration d'origine.
+
+📖 **Chaque paramètre est documenté en détail** (rôle, bornes, valeur par défaut, comment le régler,
+interactions, recettes de configuration) dans **[PARAMETRES.md](PARAMETRES.md)**.
 
 ---
 
@@ -386,8 +390,14 @@ Un aperçu live calcule marge/exposition/gain TP/perte SL selon les valeurs en c
 | `public/index.html` | Dashboard SPA : graphique d'équité SVG avec tooltips au survol, cartes signaux par paire, positions ouvertes (barre SL→TP, durée live, fermeture manuelle), historique des trades (heure d'entrée + durée), tableau statistiques, panneau paramètres éditable repliable, panneau clés API occultable, pastille PAPER/LIVE, uptime, toasts. |
 | `public/login.html` | Page de connexion au dashboard. |
 | `test_strategy.js` | Suite de tests de la stratégie (54 cas) : formules RSI/variation, TP/SL exacts, frais, bougies closes, agrégation, cooldown, équité, validation des paramètres, auth/CSRF e2e. |
+| `strategy.js` | Cœur de stratégie **pur** (shared live + backtest) : `entrySignal`, `checkExitBar`, `tpSlPrices`, `evaluateBar`. Aucune dépendance, aucun look-ahead. |
+| `backtest.js` | Backtesteur CLI sur données historiques réelles (`node backtest.js --symbol … --days … --mode close\|intrabar`). |
+| `alerts.js` | Notifications push Telegram / webhook générique, anti-spam 60 s, configurables depuis le dashboard. |
+| `state.js` | Persistance atomique du carnet (`state.json` + `.bak`) : reprise après crash/redémarrage. |
 | `package.json` | Dépendances (`express`, `ws`, `ccxt`) et scripts. |
 | `README.md` | Installation, démarrage, sécurité, déploiement. |
+| `STRATEGIE.md` | La stratégie et son fonctionnement détaillés de A à Z. |
+| `PARAMETRES.md` | Guide de référence : chaque paramètre et chaque fonctionnalité expliqués + recettes. |
 | `PROMPT_SKILL.md` | Prompt autonome pour reproduire le bot avec une autre IA. |
 | *(générés)* `auth.json`, `secrets.json`, `params.overrides.json` | État local sensible — exclus de git par `.gitignore`. |
 
