@@ -4,10 +4,19 @@ Bot de trading **momentum + RSI** sur les futures perpétuels Binance, avec dash
 
 > En une phrase : le bot détecte un mouvement de prix significatif sur les 10 dernières bougies **clôturées**, le confirme avec le RSI, entre dans le sens du mouvement avec 8 % de risque et un levier 10x, puis sort automatiquement à **+2,8 %** (TP) ou **−1,0 %** (SL).
 
+### 📚 Documentation complète
+
+| Document | Contenu |
+|---|---|
+| **[STRATEGIE.md](STRATEGIE.md)** | La stratégie et le fonctionnement du bot **de A à Z** : cycle de vie d'un tick, formules exactes (RSI Wilder, variation, sizing, TP/SL, frais, équité), money management, garde-fous, pièges corrigés, rôle de chaque fichier, annexe avec exemple de trade chiffré pas à pas. Indépendant du code — suffisant pour reconstruire le bot dans un autre langage. |
+| **[PROMPT_SKILL.md](PROMPT_SKILL.md)** | Prompt autonome prêt à coller dans une autre IA pour reproduire momBot : version complète (bot + dashboard + sécurité) et version minimale (cœur stratégie + tests), avec contraintes de qualité non négociables et conseils d'utilisation. |
+| README.md (ci-dessous) | Installation, démarrage rapide, sécurité, modes paper/réel, API, déploiement. |
+
 ---
 
 ## Sommaire
 
+0. [Documentation complète](#-documentation-complète) → STRATEGIE.md (A→Z) et PROMPT_SKILL.md (prompt de reproduction)
 1. [Démarrage rapide](#démarrage-rapide)
 2. [La stratégie de A à Z](#la-stratégie-de-à-z)
    - [Paramètres généraux](#1-paramètres-généraux)
@@ -215,6 +224,9 @@ bot/
 │   ├── index.html         ← dashboard complet (HTML/CSS/JS, zéro framework)
 │   └── login.html         ← page de connexion
 ├── test_strategy.js       ← 54 tests unitaires de la stratégie
+├── README.md              ← installation, sécurité, modes paper/réel, API, déploiement
+├── STRATEGIE.md           ← documentation complète de la stratégie et du fonctionnement (A→Z)
+├── PROMPT_SKILL.md        ← prompt autonome pour reproduire le bot avec une autre IA
 ├── package.json           ← dépendances : ccxt, express, ws
 ├── .gitignore             ← node_modules/, *.log, auth.json, secrets.json, overrides, .env
 └── fichiers générés (jamais commités) :
